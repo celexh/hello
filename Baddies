@@ -1581,7 +1581,31 @@ function UI:HandleCombat(deltaTime)
 end
 
 function UI:IsATMValid(atm)
-    return atm ~= nil and atm.Parent ~= nil and atm.Position ~= nil
+    return atm ~= nil and atm.Parent ~= nil and atm.Position ~= nil and atm.Position.Y > -30
+end
+
+function UI:GetFarmTargetPart(model)
+    if not model or not model.Parent then
+        return nil
+    end
+
+    local directPart = model:FindFirstChild("Part")
+    if directPart and directPart:IsA("BasePart") and directPart.Position and directPart.Position.Y > -30 then
+        return directPart
+    end
+
+    local screenPart = model:FindFirstChild("Screen")
+    if screenPart and screenPart:IsA("BasePart") and screenPart.Position and screenPart.Position.Y > -30 then
+        return screenPart
+    end
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("BasePart") and descendant.Position and descendant.Position.Y > -30 then
+            return descendant
+        end
+    end
+
+    return nil
 end
 
 function UI:GetATMScreen(atm)
@@ -1795,8 +1819,8 @@ function UI:BuildATMCache()
                 (descendant.Name == "ATM" and self:IsTargetTypeEnabled("ATM"))
                 or (descendant.Name == "CashRegister" and self:IsTargetTypeEnabled("CashRegister"))
             ) then
-                local targetPart = descendant:FindFirstChild("Part")
-                if targetPart and targetPart:IsA("BasePart") then
+                local targetPart = self:GetFarmTargetPart(descendant)
+                if targetPart then
                     table.insert(cache, targetPart)
                 end
             end
