@@ -1,0 +1,2700 @@
+if not math.clamp then
+    math.clamp = function(val, min, max)
+        return math.min(math.max(val, min), max)
+    end
+end
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local LocalMouse = LocalPlayer and LocalPlayer:GetMouse() or nil
+
+local Theme = {
+    shadow = Color3.fromRGB(5, 5, 6),
+    bg = Color3.fromRGB(23, 24, 29),
+    shell = Color3.fromRGB(29, 31, 37),
+    sidebar = Color3.fromRGB(34, 36, 42),
+    panel = Color3.fromRGB(26, 27, 33),
+    panelAlt = Color3.fromRGB(37, 39, 46),
+    card = Color3.fromRGB(33, 35, 41),
+    border = Color3.fromRGB(45, 47, 54),
+    accent = Color3.fromRGB(54, 248, 87),
+    accentSoft = Color3.fromRGB(40, 180, 70),
+    accentWarm = Color3.fromRGB(54, 248, 87),
+    text = Color3.fromRGB(240, 240, 242),
+    textDim = Color3.fromRGB(156, 159, 168),
+    success = Color3.fromRGB(255, 255, 255),
+    danger = Color3.fromRGB(240, 90, 90),
+}
+
+local function NewBucket()
+    return {
+        objects = {},
+        visible = false,
+        built = false,
+    }
+end
+
+local function SafeName(instance)
+    if not instance then
+        return "nil"
+    end
+
+    local ok, name = pcall(function()
+        return instance:GetFullName()
+    end)
+
+    if ok and name then
+        return name
+    end
+
+    return tostring(instance.Name or instance)
+end
+
+local UI = {
+    isRunning = true,
+    uiVisible = true,
+    needsRedraw = true,
+    shellDirty = true,
+    tabDirty = {true, true, true, true},
+    hitboxes = {},
+    hoveredId = nil,
+    lastMousePressed = false,
+    draggingWindow = false,
+    draggingScroll = false,
+    draggingSlider = false,
+    activeSlider = nil,
+    dragOffsetX = 0,
+    dragOffsetY = 0,
+    scrollDragOffset = 0,
+    lastToggleTick = 0,
+    expandedDropdown = nil,
+    selectedTab = 1,
+    autoFarmTarget = nil,
+    autoFarmLastGoal = nil,
+    autoFarmSpeed = 40,
+    autoFarmWaitUntil = 0,
+    autoFarmLastUpdate = 0,
+    autoFarmUpdateInterval = 0.05,
+    autoFarmLastClick = 0,
+    autoFarmClickInterval = 0.15,
+    autoFarmCashTarget = nil,
+    autoFarmLastInteract = 0,
+    autoFarmInteractInterval = 0.15,
+    noclipEnabled = false,
+    hitboxCache = {},
+    hitboxApplyInterval = 0.2,
+    hitboxLastApply = 0,
+    lastHitboxMultiplier = nil,
+    atmCache = {},
+    atmCacheBuilt = false,
+    visitedATMs = {},
+    lastCharacter = nil,
+    combatTarget = nil,
+    combatLastUpdate = 0,
+    combatUpdateInterval = 0.05,
+    combatPlayerRefreshAt = 0,
+    combatPlayerRefreshInterval = 1,
+    leftMouseHeldByCombat = false,
+    leftMouseLastHoldTick = 0,
+    combatLastClick = 0,
+    combatClickInterval = 0.08,
+    combatRetreating = false,
+    combatRetreatAnchor = nil,
+    combatStomping = false,
+    combatStompStartedAt = 0,
+    combatStompTarget = nil,
+    interactKeyHeldByCombat = false,
+    sessionStartedAt = tick(),
+    sessionMoneyMade = 0,
+    allTimeMoneyMade = 0,
+    lastKnownMoney = nil,
+    statsLastRefresh = 0,
+    statsRefreshInterval = 0.25,
+    statsLastSave = 0,
+    statsSaveInterval = 2,
+    statsSaveDirty = false,
+    statsFolderName = "WindyBaddies",
+    statsFileName = "stats.txt",
+    configFolderName = "WindyBaddies",
+    configFileName = "config.json",
+    offsetsUrl = "https://imtheo.lol/Offsets/Offsets.json",
+    offsetsLoaded = false,
+    offsetsLoadAttempted = false,
+    offsetsData = nil,
+    flatOffsets = {},
+    combatAutoRotateState = nil,
+
+    window = {
+        x = 220,
+        y = 140,
+        width = 620,
+        height = 340,
+        headerHeight = 42,
+        footerHeight = 20,
+        padding = 16,
+        sidebarWidth = 185,
+    },
+
+    scroll = {
+        offset = 0,
+        max = 0,
+    },
+
+    shellBucket = NewBucket(),
+    tabBuckets = {
+        NewBucket(),
+        NewBucket(),
+        NewBucket(),
+        NewBucket(),
+    },
+
+    tabs = {
+        {name = "HOME"},
+        {name = "AUTO FARM"},
+        {name = "COMBAT"},
+        {name = "SETTINGS"},
+    },
+
+    controls = {
+        {
+            {
+                id = "stat_uptime",
+                type = "stat",
+                label = "Uptime",
+                value = "0s",
+            },
+            {
+                id = "stat_money",
+                type = "stat",
+                label = "Money",
+                value = "$0",
+            },
+            {
+                id = "stat_kills",
+                type = "stat",
+                label = "Kills",
+                value = "0",
+            },
+            {
+                id = "stat_money_made",
+                type = "stat",
+                label = "Money Made",
+                value = "$0",
+            },
+            {
+                id = "stat_hourly_money",
+                type = "stat",
+                label = "Hourly Money",
+                value = "$0/hr",
+            },
+            {
+                id = "stat_all_time_money_made",
+                type = "stat",
+                label = "All Time Money Made",
+                value = "$0",
+            },
+        },
+        {
+            {
+                id = "auto_farm_toggle",
+                type = "toggle",
+                label = "Auto Farm",
+                description = "",
+                value = false,
+            },
+            {
+                id = "target_type_filter",
+                type = "dropdown_multi",
+                label = "Target Types",
+                description = "",
+                options = {"ATM", "CashRegister"},
+                selected = {
+                    ["ATM"] = true,
+                    ["CashRegister"] = true,
+                },
+            },
+            {
+                id = "hitbox_expander",
+                type = "slider",
+                label = "Hitbox Expander",
+                description = "",
+                min = 1,
+                max = 6,
+                step = 1,
+                value = 1,
+            },
+            {
+                id = "cash_test_button",
+                type = "button",
+                label = "Cash Test",
+                description = "",
+                accent = "accent",
+            },
+        },
+        {
+            {
+                id = "kill_player_toggle",
+                type = "toggle",
+                label = "Kill Player",
+                description = "",
+                value = false,
+            },
+            {
+                id = "kill_player_target",
+                type = "dropdown_single",
+                label = "Player",
+                description = "",
+                value = "",
+                options = {},
+            },
+            {
+                id = "get_tools_button",
+                type = "button",
+                label = "Get Tools",
+                description = "",
+                accent = "accent",
+            },
+        },
+        {
+            {
+                id = "tween_speed",
+                type = "slider",
+                label = "Tween Speed",
+                description = "",
+                min = 10,
+                max = 120,
+                step = 1,
+                value = 40,
+            },
+            {
+                id = "auto_save_config",
+                type = "toggle",
+                label = "Auto Save Config",
+                description = "",
+                value = true,
+            },
+        },
+    },
+}
+
+local HitboxBodyPartNames = {
+    "Head",
+    "UpperTorso",
+    "LowerTorso",
+    "Torso",
+    "LeftUpperArm",
+    "LeftLowerArm",
+    "LeftHand",
+    "RightUpperArm",
+    "RightLowerArm",
+    "RightHand",
+    "LeftUpperLeg",
+    "LeftLowerLeg",
+    "LeftFoot",
+    "RightUpperLeg",
+    "RightLowerLeg",
+    "RightFoot",
+    "Left Arm",
+    "Right Arm",
+    "Left Leg",
+    "Right Leg",
+}
+
+local VK_Z = 0x5A
+local VK_N = 0x4E
+
+function UI:Track(bucket, obj)
+    table.insert(bucket.objects, obj)
+    return obj
+end
+
+function UI:ClearBucket(bucket)
+    for _, obj in ipairs(bucket.objects) do
+        pcall(function()
+            obj:Remove()
+        end)
+    end
+    bucket.objects = {}
+    bucket.visible = false
+    bucket.built = false
+end
+
+function UI:HideBucket(bucket)
+    for _, obj in ipairs(bucket.objects) do
+        obj.Visible = false
+    end
+    bucket.visible = false
+end
+
+function UI:ShowBucket(bucket)
+    for _, obj in ipairs(bucket.objects) do
+        obj.Visible = true
+    end
+    bucket.visible = true
+end
+
+function UI:ClearAllBuckets()
+    self:ClearBucket(self.shellBucket)
+    for _, bucket in ipairs(self.tabBuckets) do
+        self:ClearBucket(bucket)
+    end
+end
+
+function UI:CreateSquare(bucket, x, y, w, h, color, transparency, filled, thickness)
+    local square = Drawing.new("Square")
+    square.Position = Vector2.new(x, y)
+    square.Size = Vector2.new(w, h)
+    square.Color = color
+    square.Transparency = transparency or 1
+    square.Filled = filled ~= false
+    square.Visible = true
+    if not square.Filled then
+        square.Thickness = thickness or 1
+    end
+    return self:Track(bucket, square)
+end
+
+function UI:CreateText(bucket, text, x, y, color, size, center)
+    local label = Drawing.new("Text")
+    label.Text = text
+    label.Position = Vector2.new(x, y)
+    label.Color = color
+    label.Size = size or 13
+    label.Center = center or false
+    label.Outline = true
+    label.Visible = true
+    label.Font = 2
+    return self:Track(bucket, label)
+end
+
+function UI:CreateLine(bucket, fromX, fromY, toX, toY, color, transparency, thickness)
+    local line = Drawing.new("Line")
+    line.From = Vector2.new(fromX, fromY)
+    line.To = Vector2.new(toX, toY)
+    line.Color = color
+    line.Transparency = transparency or 1
+    line.Thickness = thickness or 1
+    line.Visible = true
+    return self:Track(bucket, line)
+end
+
+function UI:CreateCircle(bucket, x, y, radius, color, transparency, filled, thickness)
+    local circle = Drawing.new("Circle")
+    circle.Position = Vector2.new(x, y)
+    circle.Radius = radius
+    circle.Color = color
+    circle.Transparency = transparency or 1
+    circle.Filled = filled ~= false
+    circle.Visible = true
+    if not circle.Filled then
+        circle.Thickness = thickness or 1
+    end
+    return self:Track(bucket, circle)
+end
+
+function UI:GetMouseLocation()
+    if UserInputService then
+        local ok, result = pcall(function()
+            return UserInputService:GetMouseLocation()
+        end)
+        if ok and result then
+            return result
+        end
+    end
+
+    if LocalMouse and LocalMouse.X and LocalMouse.Y then
+        return Vector2.new(LocalMouse.X, LocalMouse.Y)
+    end
+
+    return Vector2.new(0, 0)
+end
+
+function UI:IsLeftMousePressed()
+    if type(ismouse1pressed) == "function" then
+        local ok, result = pcall(ismouse1pressed)
+        if ok then
+            return result == true
+        end
+    end
+
+    if UserInputService and type(UserInputService.IsMouseButtonPressed) == "function" then
+        local ok, result = pcall(function()
+            return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+        end)
+        if ok then
+            return result == true
+        end
+    end
+
+    return false
+end
+
+function UI:IsRightMousePressed()
+    if type(ismouse2pressed) == "function" then
+        local ok, result = pcall(ismouse2pressed)
+        if ok then
+            return result == true
+        end
+    end
+
+    if UserInputService and type(UserInputService.IsMouseButtonPressed) == "function" then
+        local ok, result = pcall(function()
+            return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+        end)
+        if ok then
+            return result == true
+        end
+    end
+
+    return false
+end
+
+function UI:IsKeyPressed(keyCode)
+    if type(iskeypressed) == "function" then
+        local ok, result = pcall(iskeypressed, keyCode)
+        if ok then
+            return result == true
+        end
+    end
+
+    return false
+end
+
+function UI:RegisterHitbox(id, x, y, w, h, onClick, priority)
+    table.insert(self.hitboxes, {
+        id = id,
+        x = x,
+        y = y,
+        w = w,
+        h = h,
+        onClick = onClick,
+        priority = priority or 0,
+    })
+end
+
+function UI:PointInRect(px, py, x, y, w, h)
+    return px >= x and px <= x + w and py >= y and py <= y + h
+end
+
+function UI:IsMouseOver(x, y, w, h)
+    local mousePos = self:GetMouseLocation()
+    return self:PointInRect(mousePos.X, mousePos.Y, x, y, w, h)
+end
+
+function UI:GetActiveControls()
+    return self.controls[self.selectedTab] or {}
+end
+
+function UI:GetDropdownSelectionText(control)
+    if control.type == "dropdown_single" then
+        return control.value or "None"
+    end
+
+    local active = {}
+    for _, option in ipairs(control.options or {}) do
+        if control.selected and control.selected[option] then
+            table.insert(active, option)
+        end
+    end
+
+    if #active == 0 then
+        return "Nothing selected"
+    end
+
+    if #active <= 2 then
+        return table.concat(active, ", ")
+    end
+
+    return active[1] .. ", " .. active[2] .. " +" .. tostring(#active - 2)
+end
+
+function UI:GetSliderPercent(control)
+    local minValue = control.min or 0
+    local maxValue = control.max or 1
+    local value = control.value or minValue
+    if maxValue <= minValue then
+        return 0
+    end
+
+    return math.clamp((value - minValue) / (maxValue - minValue), 0, 1)
+end
+
+function UI:SetSliderValue(control, percent)
+    local minValue = control.min or 0
+    local maxValue = control.max or 1
+    local stepValue = control.step or 1
+    local rawValue = minValue + ((maxValue - minValue) * math.clamp(percent, 0, 1))
+    local steppedValue = minValue + math.floor(((rawValue - minValue) / stepValue) + 0.5) * stepValue
+    steppedValue = math.clamp(steppedValue, minValue, maxValue)
+
+    if control.value ~= steppedValue then
+        control.value = steppedValue
+        self:MarkCurrentTabDirty()
+        self:SaveConfig(false)
+    end
+end
+
+function UI:SetSliderFromMouse(control, mouseX)
+    local sliderX = control._sliderX or 0
+    local sliderW = control._sliderW or 1
+    local percent = (mouseX - sliderX) / sliderW
+    self:SetSliderValue(control, percent)
+end
+
+function UI:GetContentBounds()
+    local x = self.window.x + self.window.sidebarWidth + 14
+    local y = self.window.y + 18
+    local width = self.window.width - self.window.sidebarWidth - 28
+    local height = self.window.height - 34
+    return x, y, width, height
+end
+
+function UI:GetScrollbarMetrics()
+    local x, y, width, height = self:GetContentBounds()
+    local scrollbarX = x + width - 10
+    local scrollbarY = y + 8
+    local scrollbarW = 4
+    local scrollbarH = height - 16
+    local thumbH = 0
+    local thumbY = scrollbarY
+
+    if self.scroll.max > 0 then
+        thumbH = math.max(34, math.floor(scrollbarH * (height / (height + self.scroll.max))))
+        local available = math.max(1, scrollbarH - thumbH)
+        thumbY = scrollbarY + math.floor((self.scroll.offset / self.scroll.max) * available)
+    end
+
+    return scrollbarX, scrollbarY, scrollbarW, scrollbarH, thumbY, thumbH
+end
+
+function UI:UpdateScrollLimit()
+    local _, _, _, viewportHeight = self:GetContentBounds()
+    local contentHeight = 28
+
+    for _, control in ipairs(self:GetActiveControls()) do
+        contentHeight = contentHeight + ((control.type == "stat") and 42 or 88)
+        if self.expandedDropdown == control.id and control.options then
+            contentHeight = contentHeight + (#control.options * 28) + 10
+        end
+    end
+
+    self.scroll.max = math.max(0, contentHeight - viewportHeight + 12)
+    self.scroll.offset = math.clamp(self.scroll.offset, 0, self.scroll.max)
+end
+
+function UI:MarkShellDirty()
+    self.shellDirty = true
+    self.needsRedraw = true
+end
+
+function UI:MarkTabDirty(tabIndex)
+    self.tabDirty[tabIndex] = true
+    self.needsRedraw = true
+end
+
+function UI:MarkCurrentTabDirty()
+    self:MarkTabDirty(self.selectedTab)
+end
+
+function UI:ToggleDropdown(controlId)
+    if self.expandedDropdown == controlId then
+        self.expandedDropdown = nil
+    else
+        self.expandedDropdown = controlId
+    end
+    self:UpdateScrollLimit()
+    self:MarkCurrentTabDirty()
+end
+
+function UI:DebugLog(message)
+    return
+end
+
+function UI:DebugWarn(message)
+    return
+end
+
+function UI:DebugWarnThrottle(key, interval, message)
+    return
+end
+
+function UI:FlattenOffsetsTable(prefix, source, output)
+    if type(source) ~= "table" then
+        return
+    end
+
+    for key, value in pairs(source) do
+        local keyName = tostring(key)
+        local path = prefix ~= "" and (prefix .. "." .. keyName) or keyName
+        if type(value) == "number" then
+            output[path] = value
+        elseif type(value) == "table" then
+            self:FlattenOffsetsTable(path, value, output)
+        end
+    end
+end
+
+function UI:LoadOffsets()
+    if self.offsetsLoaded or self.offsetsLoadAttempted then
+        return self.offsetsLoaded
+    end
+
+    self.offsetsLoadAttempted = true
+
+    local httpMethod = game and (game.HttpGet or game.httpget)
+    if type(httpMethod) ~= "function" or not HttpService then
+        self:DebugWarn("Offsets loader unavailable: HttpGet/HttpService missing")
+        return false
+    end
+
+    local ok, response = pcall(function()
+        return httpMethod(game, self.offsetsUrl)
+    end)
+
+    if not ok or not response or response == "" then
+        self:DebugWarn("Failed to download offsets JSON")
+        return false
+    end
+
+    local decodeOk, decoded = pcall(function()
+        return HttpService:JSONDecode(response)
+    end)
+
+    if not decodeOk or type(decoded) ~= "table" then
+        self:DebugWarn("Failed to parse offsets JSON")
+        return false
+    end
+
+    local flat = {}
+    self:FlattenOffsetsTable("", decoded.Offsets or {}, flat)
+
+    self.offsetsData = decoded
+    self.flatOffsets = flat
+    self.offsetsLoaded = true
+
+    local totalOffsets = tonumber(decoded["Total Offsets"]) or 0
+    local flatCount = 0
+    for _ in pairs(flat) do
+        flatCount = flatCount + 1
+    end
+
+    return true
+end
+
+function UI:GetOffset(path)
+    if not self.offsetsLoaded then
+        self:LoadOffsets()
+    end
+
+    return self.flatOffsets[path]
+end
+
+function UI:GetInstanceAddress(instance)
+    if not instance then
+        return nil
+    end
+
+    local ok, directAddress = pcall(function()
+        return instance.Address
+    end)
+    if ok and type(directAddress) == "number" and directAddress > 0 then
+        return directAddress
+    end
+
+    local resolvers = {
+        getinstanceaddress,
+        get_instance_address,
+        getaddressfrominstance,
+        get_address_from_instance,
+    }
+
+    for _, resolver in ipairs(resolvers) do
+        if type(resolver) == "function" then
+            local ok, address = pcall(resolver, instance)
+            if ok and type(address) == "number" and address > 0 then
+                return address
+            end
+        end
+    end
+
+    local ok, address = pcall(function()
+        return tonumber(instance)
+    end)
+    if ok and type(address) == "number" and address > 0 then
+        return address
+    end
+
+    return nil
+end
+
+function UI:GetCharacterRoot()
+    local character = LocalPlayer and LocalPlayer.Character
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChild("HumanoidRootPart")
+end
+
+function UI:GetCharacterHumanoid()
+    local character = LocalPlayer and LocalPlayer.Character
+    if not character then
+        return nil
+    end
+
+    return character:FindFirstChildOfClass("Humanoid")
+end
+
+function UI:WriteHumanoidAutoRotate(enabled)
+    local humanoid = self:GetCharacterHumanoid()
+    if not humanoid then
+        return false
+    end
+
+    local offset = self:GetOffset("Humanoid.AutoRotate")
+    local address = self:GetInstanceAddress(humanoid)
+
+    if offset and address and type(memory_write) == "function" then
+        local ok = pcall(function()
+            memory_write("byte", address + offset, enabled and 1 or 0)
+        end)
+        if ok then
+            self.combatAutoRotateState = enabled
+            return true
+        end
+    end
+
+    local propertyOk = pcall(function()
+        humanoid.AutoRotate = enabled
+    end)
+    if propertyOk then
+        self.combatAutoRotateState = enabled
+        return true
+    end
+
+    return false
+end
+
+function UI:SetCharacterNoclip(enabled)
+    if self.noclipEnabled == enabled then
+        return
+    end
+
+    local character = LocalPlayer and LocalPlayer.Character
+    if not character then
+        warn("No HumanoidRoot")
+        return
+    end
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("BasePart") then
+            descendant.CanCollide = not enabled
+        end
+    end
+
+    self.noclipEnabled = enabled
+end
+
+function UI:IsAutoFarmEnabled()
+    local autoFarmTab = self.controls[2] or {}
+    for _, control in ipairs(autoFarmTab) do
+        if control.id == "auto_farm_toggle" then
+            return control.value == true
+        end
+    end
+
+    return false
+end
+
+function UI:GetControl(tabIndex, controlId)
+    local tabControls = self.controls[tabIndex] or {}
+    for _, control in ipairs(tabControls) do
+        if control.id == controlId then
+            return control
+        end
+    end
+
+    return nil
+end
+
+function UI:FormatWholeNumber(value)
+    local numberValue = math.floor(tonumber(value) or 0)
+    local formatted = tostring(numberValue)
+
+    while true do
+        local replaced, count = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
+        formatted = replaced
+        if count == 0 then
+            break
+        end
+    end
+
+    return formatted
+end
+
+function UI:FormatMoney(value)
+    return "$" .. self:FormatWholeNumber(value)
+end
+
+function UI:FormatDuration(secondsValue)
+    local totalSeconds = math.max(0, math.floor(tonumber(secondsValue) or 0))
+    local hours = math.floor(totalSeconds / 3600)
+    local minutes = math.floor((totalSeconds % 3600) / 60)
+    local seconds = totalSeconds % 60
+
+    if hours > 0 then
+        return string.format("%dh %dm %ds", hours, minutes, seconds)
+    end
+
+    if minutes > 0 then
+        return string.format("%dm %ds", minutes, seconds)
+    end
+
+    return string.format("%ds", seconds)
+end
+
+function UI:GetStatsFolderPath()
+    return self.statsFolderName or "WindyBaddies"
+end
+
+function UI:GetStatsFilePath()
+    return self:GetStatsFolderPath() .. "/" .. (self.statsFileName or "stats.txt")
+end
+
+function UI:GetConfigFolderPath()
+    return self.configFolderName or "WindyBaddies"
+end
+
+function UI:GetConfigFilePath()
+    return self:GetConfigFolderPath() .. "/" .. (self.configFileName or "config.json")
+end
+
+function UI:EnsureStatsStorage()
+    if type(isfolder) == "function" then
+        local ok, exists = pcall(isfolder, self:GetStatsFolderPath())
+        if ok and exists then
+            return true
+        end
+    end
+
+    if type(makefolder) == "function" then
+        local ok = pcall(makefolder, self:GetStatsFolderPath())
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+function UI:EnsureConfigStorage()
+    if type(isfolder) == "function" then
+        local ok, exists = pcall(isfolder, self:GetConfigFolderPath())
+        if ok and exists then
+            return true
+        end
+    end
+
+    if type(makefolder) == "function" then
+        local ok = pcall(makefolder, self:GetConfigFolderPath())
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+function UI:IsAutoSaveConfigEnabled()
+    local control = self:GetControl(4, "auto_save_config")
+    return control and control.value == true
+end
+
+function UI:BuildConfigData()
+    local data = {
+        version = 1,
+        controls = {},
+    }
+
+    for tabIndex, tabControls in ipairs(self.controls or {}) do
+        for _, control in ipairs(tabControls) do
+            if control.type ~= "button" and control.type ~= "stat" then
+                local entry = {
+                    tab = tabIndex,
+                    type = control.type,
+                }
+
+                if control.type == "dropdown_multi" then
+                    entry.selected = control.selected or {}
+                elseif control.type == "dropdown_single" then
+                    entry.value = control.value
+                else
+                    entry.value = control.value
+                end
+
+                data.controls[control.id] = entry
+            end
+        end
+    end
+
+    return data
+end
+
+function UI:ApplyConfigData(data)
+    if type(data) ~= "table" or type(data.controls) ~= "table" then
+        return
+    end
+
+    for controlId, saved in pairs(data.controls) do
+        if type(saved) == "table" then
+            local tabIndex = tonumber(saved.tab)
+            local control = tabIndex and self:GetControl(tabIndex, controlId) or nil
+            if control then
+                if control.type == "dropdown_multi" and type(saved.selected) == "table" then
+                    local applied = {}
+                    for option, isSelected in pairs(saved.selected) do
+                        applied[tostring(option)] = isSelected == true
+                    end
+                    control.selected = applied
+                elseif saved.value ~= nil and control.type ~= "button" and control.type ~= "stat" then
+                    control.value = saved.value
+                end
+            end
+        end
+    end
+
+    self:ResetAutoFarmRoute()
+    self:RefreshCombatPlayerOptions(true)
+    self:MarkShellDirty()
+    for tabIndex = 1, #self.tabDirty do
+        self:MarkTabDirty(tabIndex)
+    end
+end
+
+function UI:SaveConfig(force)
+    if not force and not self:IsAutoSaveConfigEnabled() then
+        return false
+    end
+
+    if type(writefile) ~= "function" or not HttpService then
+        return false
+    end
+
+    self:EnsureConfigStorage()
+
+    local encodeOk, payload = pcall(function()
+        return HttpService:JSONEncode(self:BuildConfigData())
+    end)
+    if not encodeOk or not payload then
+        return false
+    end
+
+    local writeOk = pcall(writefile, self:GetConfigFilePath(), payload)
+    return writeOk
+end
+
+function UI:LoadConfig()
+    if type(readfile) ~= "function" or type(isfile) ~= "function" or not HttpService then
+        return false
+    end
+
+    self:EnsureConfigStorage()
+
+    local existsOk, exists = pcall(isfile, self:GetConfigFilePath())
+    if not existsOk or not exists then
+        return false
+    end
+
+    local readOk, payload = pcall(readfile, self:GetConfigFilePath())
+    if not readOk or not payload or payload == "" then
+        return false
+    end
+
+    local decodeOk, data = pcall(function()
+        return HttpService:JSONDecode(payload)
+    end)
+    if not decodeOk or type(data) ~= "table" then
+        return false
+    end
+
+    self:ApplyConfigData(data)
+    return true
+end
+
+function UI:LoadAllTimeMoneyMade()
+    if type(readfile) ~= "function" or type(isfile) ~= "function" then
+        return
+    end
+
+    self:EnsureStatsStorage()
+
+    local path = self:GetStatsFilePath()
+    local existsOk, exists = pcall(isfile, path)
+    if not existsOk or not exists then
+        self.allTimeMoneyMade = 0
+        return
+    end
+
+    local readOk, contents = pcall(readfile, path)
+    if not readOk then
+        self.allTimeMoneyMade = 0
+        return
+    end
+
+    local loadedValue = tonumber(contents) or 0
+    self.allTimeMoneyMade = math.max(0, math.floor(loadedValue))
+end
+
+function UI:SaveAllTimeMoneyMade(force)
+    if type(writefile) ~= "function" then
+        return
+    end
+
+    local now = tick()
+    if not force then
+        if not self.statsSaveDirty then
+            return
+        end
+
+        if (now - (self.statsLastSave or 0)) < (self.statsSaveInterval or 2) then
+            return
+        end
+    end
+
+    self:EnsureStatsStorage()
+
+    local saveOk = pcall(writefile, self:GetStatsFilePath(), tostring(math.max(0, math.floor(self.allTimeMoneyMade or 0))))
+    if saveOk then
+        self.statsLastSave = now
+        self.statsSaveDirty = false
+    end
+end
+
+function UI:GetLeaderstatValue(statName)
+    local player = LocalPlayer
+    if not player then
+        return nil
+    end
+
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if not leaderstats then
+        return nil
+    end
+
+    local stat = leaderstats:FindFirstChild(statName)
+    if not stat then
+        return nil
+    end
+
+    local value = nil
+    pcall(function()
+        value = stat.Value
+    end)
+
+    return tonumber(value)
+end
+
+function UI:UpdateHomeStats()
+    local now = tick()
+    if (now - (self.statsLastRefresh or 0)) < (self.statsRefreshInterval or 0.25) then
+        self:SaveAllTimeMoneyMade(false)
+        return
+    end
+
+    self.statsLastRefresh = now
+
+    local currentMoney = self:GetLeaderstatValue("Dinero") or 0
+    local currentKills = self:GetLeaderstatValue("Slays") or 0
+
+    if self.lastKnownMoney == nil then
+        self.lastKnownMoney = currentMoney
+    elseif currentMoney > self.lastKnownMoney then
+        local delta = currentMoney - self.lastKnownMoney
+        self.sessionMoneyMade = (self.sessionMoneyMade or 0) + delta
+        self.allTimeMoneyMade = (self.allTimeMoneyMade or 0) + delta
+        self.statsSaveDirty = true
+    end
+
+    self.lastKnownMoney = currentMoney
+
+    local uptimeSeconds = now - (self.sessionStartedAt or now)
+    local hourlyMoney = 0
+    if uptimeSeconds > 0 then
+        hourlyMoney = (self.sessionMoneyMade or 0) * (3600 / uptimeSeconds)
+    end
+
+    local statUptime = self:GetControl(1, "stat_uptime")
+    local statMoney = self:GetControl(1, "stat_money")
+    local statKills = self:GetControl(1, "stat_kills")
+    local statMoneyMade = self:GetControl(1, "stat_money_made")
+    local statHourlyMoney = self:GetControl(1, "stat_hourly_money")
+    local statAllTimeMoneyMade = self:GetControl(1, "stat_all_time_money_made")
+
+    if statUptime then
+        statUptime.value = self:FormatDuration(uptimeSeconds)
+    end
+    if statMoney then
+        statMoney.value = self:FormatMoney(currentMoney)
+    end
+    if statKills then
+        statKills.value = self:FormatWholeNumber(currentKills)
+    end
+    if statMoneyMade then
+        statMoneyMade.value = self:FormatMoney(self.sessionMoneyMade or 0)
+    end
+    if statHourlyMoney then
+        statHourlyMoney.value = self:FormatMoney(hourlyMoney) .. "/hr"
+    end
+    if statAllTimeMoneyMade then
+        statAllTimeMoneyMade.value = self:FormatMoney(self.allTimeMoneyMade or 0)
+    end
+
+    self:SaveAllTimeMoneyMade(false)
+    self:MarkTabDirty(1)
+end
+
+function UI:GetTargetTypeFilter()
+    return self:GetControl(2, "target_type_filter")
+end
+
+function UI:IsTargetTypeEnabled(targetType)
+    local filter = self:GetTargetTypeFilter()
+    if not filter or not filter.selected then
+        return true
+    end
+
+    return filter.selected[targetType] == true
+end
+
+function UI:ResetAutoFarmRoute()
+    self.atmCacheBuilt = false
+    self.atmCache = {}
+    self.autoFarmTarget = nil
+    self.autoFarmLastGoal = nil
+    self.autoFarmWaitUntil = 0
+    self.autoFarmLastUpdate = 0
+    self.autoFarmLastClick = 0
+    self.autoFarmCashTarget = nil
+    self.autoFarmLastInteract = 0
+    self:ResetATMVisited()
+end
+
+function UI:GetKillPlayerToggle()
+    return self:GetControl(3, "kill_player_toggle")
+end
+
+function UI:GetKillPlayerTargetControl()
+    return self:GetControl(3, "kill_player_target")
+end
+
+function UI:RefreshCombatPlayerOptions(force)
+    local now = tick()
+    if not force and (now - self.combatPlayerRefreshAt) < self.combatPlayerRefreshInterval then
+        return
+    end
+
+    self.combatPlayerRefreshAt = now
+
+    local control = self:GetKillPlayerTargetControl()
+    if not control then
+        return
+    end
+
+    local options = {}
+    local previousValue = control.value
+    local previousCount = #(control.options or {})
+    local previousSignature = table.concat(control.options or {}, "\0")
+    local selectedStillExists = false
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(options, player.Name)
+            if control.value == player.Name then
+                selectedStillExists = true
+            end
+        end
+    end
+
+    table.sort(options)
+    control.options = options
+
+    if #options == 0 then
+        control.value = ""
+    elseif not selectedStillExists then
+        control.value = options[1]
+    end
+
+    local newSignature = table.concat(options, "\0")
+    if previousCount ~= #options or previousSignature ~= newSignature or previousValue ~= control.value then
+        self:MarkTabDirty(3)
+    end
+end
+
+function UI:GetSelectedCombatPlayer()
+    local control = self:GetKillPlayerTargetControl()
+    if not control or not control.value or control.value == "" then
+        return nil
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == control.value then
+            return player
+        end
+    end
+
+    return nil
+end
+
+function UI:GetEquippedCombatTool()
+    local character = LocalPlayer and LocalPlayer.Character
+    if not character then
+        return nil
+    end
+
+    for _, child in ipairs(character:GetChildren()) do
+        local className = tostring(child and child.ClassName or "")
+        local name = tostring(child and child.Name or "")
+        if (className == "Tool" or className == "HopperBin") and (name == "PinkStopSignal" or name == "1 punches") then
+            return child
+        end
+    end
+
+    return nil
+end
+
+function UI:NotifyPlayer(message, title, duration)
+    if type(notify) == "function" then
+        pcall(notify, tostring(message or ""), tostring(title or "Windy"), tonumber(duration) or 3)
+    else
+        print("Windy" .. tostring(title or "Windy") .. ": " .. tostring(message or ""))
+    end
+end
+
+function UI:SetCombatLeftMouseHeld(shouldHold)
+    if shouldHold then
+        local now = tick()
+        local shouldRefreshHold = (now - (self.leftMouseLastHoldTick or 0)) > 0.2
+        local currentlyPressed = false
+
+        if type(ismouse1pressed) == "function" then
+            local ok, result = pcall(ismouse1pressed)
+            if ok then
+                currentlyPressed = result == true
+            end
+        else
+            currentlyPressed = self.leftMouseHeldByCombat == true
+        end
+
+        if (not currentlyPressed or not self.leftMouseHeldByCombat or shouldRefreshHold) and type(mouse1press) == "function" then
+            pcall(mouse1press)
+            self.leftMouseHeldByCombat = true
+            self.leftMouseLastHoldTick = now
+        end
+    elseif not shouldHold and self.leftMouseHeldByCombat then
+        if type(mouse1release) == "function" then
+            pcall(mouse1release)
+        end
+        self.leftMouseHeldByCombat = false
+        self.leftMouseLastHoldTick = 0
+    end
+end
+
+function UI:SetCombatInteractHeld(shouldHold)
+    if shouldHold and not self.interactKeyHeldByCombat then
+        if type(setrobloxinput) == "function" then
+            pcall(setrobloxinput, true)
+        end
+        if type(keypress) == "function" then
+            pcall(keypress, 0x45)
+            self.interactKeyHeldByCombat = true
+        end
+    elseif not shouldHold and self.interactKeyHeldByCombat then
+        if type(keyrelease) == "function" then
+            pcall(keyrelease, 0x45)
+        end
+        self.interactKeyHeldByCombat = false
+    end
+end
+
+function UI:TapCombatInteract()
+    if type(setrobloxinput) == "function" then
+        pcall(setrobloxinput, true)
+    end
+
+    if type(keypress) == "function" and type(keyrelease) == "function" then
+        pcall(keypress, 0x45)
+        pcall(keyrelease, 0x45)
+    end
+end
+
+function UI:ClickCombatAttack()
+    local now = tick()
+    if (now - (self.combatLastClick or 0)) < self.combatClickInterval then
+        return
+    end
+
+    self.combatLastClick = now
+
+    if type(setrobloxinput) == "function" then
+        pcall(setrobloxinput, true)
+    end
+
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        return
+    end
+
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(mouse1press)
+        pcall(mouse1release)
+    end
+end
+
+function UI:HandleCombat(deltaTime)
+    self:RefreshCombatPlayerOptions(false)
+
+    local toggle = self:GetKillPlayerToggle()
+    if not toggle or toggle.value ~= true then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self.combatTarget = nil
+        self.combatLastUpdate = 0
+        self.combatLastClick = 0
+        self.combatRetreating = false
+        self.combatRetreatAnchor = nil
+        self.combatStomping = false
+        self.combatStompStartedAt = 0
+        self.combatStompTarget = nil
+        return
+    end
+
+    local now = tick()
+    if (now - self.combatLastUpdate) < self.combatUpdateInterval then
+        return
+    end
+    self.combatLastUpdate = now
+
+    local targetPlayer = self:GetSelectedCombatPlayer()
+    if not targetPlayer or targetPlayer == LocalPlayer then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self.combatTarget = nil
+        return
+    end
+
+    local targetCharacter = targetPlayer.Character
+    local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart") or nil
+    local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid") or nil
+    local localRoot = self:GetCharacterRoot()
+    local localHumanoid = self:GetCharacterHumanoid()
+
+    if not localRoot or not localHumanoid or localHumanoid.Health <= 0 then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self.combatRetreating = false
+        self.combatRetreatAnchor = nil
+        self.combatStomping = false
+        self.combatStompStartedAt = 0
+        self.combatStompTarget = nil
+        return
+    end
+
+    local ownHealth = localHumanoid.Health or 0
+    local retreatThreshold = 15
+
+    if ownHealth <= retreatThreshold and not self.combatRetreating then
+        self.combatRetreating = true
+        self.combatRetreatAnchor = localRoot.Position + Vector3.new(0, 100, 0)
+        self:NotifyPlayer("Low HP, retreating", "Windy Combat", 2)
+    end
+
+    if self.combatRetreating then
+        self:SetCharacterNoclip(true)
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+
+        pcall(function()
+            localRoot.Velocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.RotVelocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end)
+
+        if ownHealth >= 50 then
+            self.combatRetreating = false
+            self.combatRetreatAnchor = nil
+            self:SetCombatInteractHeld(false)
+            self:NotifyPlayer("Recovered, resuming combat", "Windy Combat", 2)
+            return
+        end
+
+        local retreatPosition = self.combatRetreatAnchor or (localRoot.Position + Vector3.new(0, 100, 0))
+        pcall(function()
+            localRoot.CFrame = CFrame.new(retreatPosition.X, retreatPosition.Y, retreatPosition.Z)
+        end)
+        return
+    end
+
+    local equippedTool = self:GetEquippedCombatTool()
+    if not equippedTool then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self.combatTarget = nil
+        self:DebugWarnThrottle("combat_missing_tool", 2, "Combat requires PinkStopSignal or 1 punches equipped")
+        self:NotifyPlayer("Equip PinkStopSignal or 1 punches first", "Windy Combat", 3)
+        return
+    end
+
+    if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self.combatTarget = nil
+        return
+    end
+
+    local targetHealth = targetHumanoid.Health or 0
+    local targetMaxHealth = targetHumanoid.MaxHealth or 100
+    local lowHealthThreshold = math.max(1, targetMaxHealth * 0.05)
+    if self.combatStomping then
+        self:SetCharacterNoclip(true)
+        local stompRoot = self.combatStompTarget and self.combatStompTarget.Parent and self.combatStompTarget or targetRoot
+        local stompPosition = stompRoot and stompRoot.Position or localRoot.Position
+        local stompTopPosition = stompPosition + Vector3.new(0, 3, 0)
+
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+
+        pcall(function()
+            localRoot.Velocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.RotVelocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            localRoot.CFrame = CFrame.new(stompTopPosition.X, stompTopPosition.Y, stompTopPosition.Z)
+        end)
+
+        self:TapCombatInteract()
+
+        if (tick() - self.combatStompStartedAt) >= 2 then
+            self:SetCombatInteractHeld(false)
+            self.combatTarget = nil
+            toggle.value = false
+            self.combatLastUpdate = 0
+            self.combatLastClick = 0
+            self.combatRetreating = false
+            self.combatRetreatAnchor = nil
+            self.combatStomping = false
+            self.combatStompStartedAt = 0
+            self.combatStompTarget = nil
+            self:MarkTabDirty(3)
+            self:NotifyPlayer("Stomp finished, stopping combat", "Windy Combat", 2)
+        end
+        return
+    end
+
+    if targetHealth <= lowHealthThreshold then
+        self:SetCombatLeftMouseHeld(false)
+        self:SetCombatInteractHeld(false)
+        self.combatStomping = true
+        self.combatStompStartedAt = tick()
+        self.combatStompTarget = targetRoot
+        self:NotifyPlayer("Target low health, stomping", "Windy Combat", 2)
+        return
+    end
+
+    self.combatTarget = targetPlayer
+    self:SetCombatLeftMouseHeld(false)
+    self:SetCombatInteractHeld(false)
+
+    pcall(function()
+        localRoot.Velocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        localRoot.RotVelocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        localRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        localRoot.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    end)
+
+    local behindDistance = 1.75
+    local targetPosition = targetRoot.Position - (targetRoot.CFrame.LookVector * behindDistance)
+    local offset = targetPosition - localRoot.Position
+    local distance = offset.Magnitude
+    if distance <= 2.25 then
+        if not self:IsAutoFarmEnabled() then
+            self:SetCharacterNoclip(false)
+        end
+        self:ClickCombatAttack()
+        return
+    end
+
+    self:SetCharacterNoclip(true)
+
+    local moveSpeed = self:GetTweenSpeed()
+    local stepDelta = self.combatUpdateInterval
+    local stepDistance = math.max(0.01, stepDelta * moveSpeed)
+    local nextPosition
+    if stepDistance >= distance then
+        nextPosition = targetPosition
+    else
+        nextPosition = localRoot.Position + (offset.Unit * stepDistance)
+    end
+
+    pcall(function()
+        localRoot.CFrame = CFrame.new(nextPosition.X, nextPosition.Y, nextPosition.Z)
+    end)
+end
+
+function UI:IsATMValid(atm)
+    return atm ~= nil and atm.Parent ~= nil and atm.Position ~= nil
+end
+
+function UI:GetATMScreen(atm)
+    if not self:IsATMValid(atm) then
+        return nil
+    end
+
+    local atmModel = atm.Parent
+    if not atmModel then
+        return nil
+    end
+
+    local screen = atmModel:FindFirstChild("Screen")
+    if screen and screen:IsA("BasePart") then
+        return screen
+    end
+
+    return nil
+end
+
+function UI:IsBlackColor(color)
+    if not color then
+        return false
+    end
+
+    local r = color.R
+    local g = color.G
+    local b = color.B
+
+    return r == 0 and g == 0 and b == 0
+end
+
+function UI:IsATMReady(atm)
+    local screen = self:GetATMScreen(atm)
+    if not screen then
+        return true
+    end
+
+    return not self:IsBlackColor(screen.Color)
+end
+
+function UI:ClickATM()
+    local now = tick()
+    if (now - self.autoFarmLastClick) < self.autoFarmClickInterval then
+        return
+    end
+
+    self.autoFarmLastClick = now
+
+    if type(setrobloxinput) == "function" then
+        pcall(setrobloxinput, true)
+    end
+
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        return
+    end
+
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(mouse1press)
+        pcall(mouse1release)
+    end
+end
+
+function UI:RunCashTest()
+    local movedCount = 0
+    local targetPosition = Vector3.new(-5, 32, -343)
+
+    for _, atm in ipairs(self:BuildATMCache()) do
+        local screen = self:GetATMScreen(atm)
+        if screen and screen.Parent then
+            pcall(function()
+                screen.Position = targetPosition
+            end)
+            movedCount = movedCount + 1
+        end
+    end
+
+    self:DebugLog("Cash Test moved " .. tostring(movedCount) .. " ATM screens")
+end
+
+function UI:PrintLocalTools()
+    if not LocalPlayer then
+        print("LocalPlayer missing")
+        return
+    end
+
+    local toolNames = {}
+    local seen = {}
+
+    local function isRealTool(instance)
+        if not instance then
+            return false
+        end
+
+        local className = tostring(instance.ClassName or "")
+        return className == "Tool" or className == "HopperBin"
+    end
+
+    local function collectTools(container, sourceName)
+        if not container then
+            return
+        end
+
+        for _, child in ipairs(container:GetChildren()) do
+            if isRealTool(child) then
+                local key = sourceName .. ":" .. tostring(child.Name)
+                if not seen[key] then
+                    seen[key] = true
+                    table.insert(toolNames, "[" .. sourceName .. "] " .. tostring(child.Name))
+                end
+            end
+        end
+    end
+
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack") or LocalPlayer:FindFirstChild("Backpack")
+    local character = LocalPlayer.Character
+
+    collectTools(backpack, "Backpack")
+    collectTools(character, "Equipped")
+
+    if #toolNames == 0 then
+        print("[Windy Tools] No tools found")
+        return
+    end
+
+    table.sort(toolNames)
+    for _, entry in ipairs(toolNames) do
+        print("[Windy Tools] " .. entry)
+    end
+end
+
+function UI:IsCashValid(cashPart)
+    return cashPart ~= nil and cashPart.Parent ~= nil and cashPart.Position ~= nil and cashPart:IsA("BasePart")
+end
+
+function UI:GetNearbyCash(excludedCash)
+    local characterRoot = self:GetCharacterRoot()
+    if not characterRoot or not characterRoot.Position then
+        return nil
+    end
+
+    local workspaceRef = game.Workspace or workspace
+    if not workspaceRef then
+        return nil
+    end
+
+    local cashFolder = workspaceRef:FindFirstChild("Cash")
+    local candidates = cashFolder and cashFolder:GetDescendants() or workspaceRef:GetDescendants()
+    local closestCash = nil
+    local closestDistance = math.huge
+
+    for _, descendant in ipairs(candidates) do
+        if descendant ~= excludedCash and descendant.Name == "Cash" and self:IsCashValid(descendant) then
+            local position = descendant.Position
+            if position then
+                local distance = (position - characterRoot.Position).Magnitude
+                if distance <= 15 and distance < closestDistance then
+                    closestDistance = distance
+                    closestCash = descendant
+                end
+            end
+        end
+    end
+
+    return closestCash
+end
+
+function UI:PressInteractKey()
+    local now = tick()
+    if (now - self.autoFarmLastInteract) < self.autoFarmInteractInterval then
+        return
+    end
+
+    self.autoFarmLastInteract = now
+
+    if type(setrobloxinput) == "function" then
+        pcall(setrobloxinput, true)
+    end
+
+    if type(keypress) == "function" and type(keyrelease) == "function" then
+        pcall(keypress, 0x45)
+        pcall(keyrelease, 0x45)
+    end
+end
+
+function UI:ResetATMVisited()
+    self.visitedATMs = {}
+end
+
+function UI:MarkATMVisited(atm)
+    if atm then
+        self.visitedATMs[atm] = true
+    end
+end
+
+function UI:HasVisitedATM(atm)
+    return atm ~= nil and self.visitedATMs[atm] == true
+end
+
+function UI:BuildATMCache()
+    if self.atmCacheBuilt then
+        return self.atmCache
+    end
+
+    local workspaceRef = game.Workspace or workspace
+    local cache = {}
+    if workspaceRef then
+        for _, descendant in ipairs(workspaceRef:GetDescendants()) do
+            if descendant:IsA("Model") and (
+                (descendant.Name == "ATM" and self:IsTargetTypeEnabled("ATM"))
+                or (descendant.Name == "CashRegister" and self:IsTargetTypeEnabled("CashRegister"))
+            ) then
+                local targetPart = descendant:FindFirstChild("Part")
+                if targetPart and targetPart:IsA("BasePart") then
+                    table.insert(cache, targetPart)
+                end
+            end
+        end
+    end
+
+    self.atmCache = cache
+    self.atmCacheBuilt = true
+    self:DebugLog("ATM/Register cache built: " .. tostring(#cache) .. " found")
+    return cache
+end
+
+function UI:GetClosestATM(excludedATM)
+    local characterRoot = self:GetCharacterRoot()
+    local atmCache = self:BuildATMCache()
+    if not characterRoot then
+        self:DebugWarnThrottle("missing root", 2, "HumanoidRootPart was not found")
+        return nil
+    end
+
+    local closestUnvisitedATM = nil
+    local closestUnvisitedDistance = math.huge
+    local closestAnyATM = nil
+    local closestAnyDistance = math.huge
+    local hasAnyUnvisitedReady = false
+
+    for _, atm in ipairs(atmCache) do
+        if self:IsATMValid(atm) and self:IsATMReady(atm) then
+            local distance = (atm.Position - characterRoot.Position).Magnitude
+
+            if atm ~= excludedATM and distance < closestAnyDistance then
+                closestAnyDistance = distance
+                closestAnyATM = atm
+            end
+
+            if not self:HasVisitedATM(atm) then
+                hasAnyUnvisitedReady = true
+                if atm ~= excludedATM and distance < closestUnvisitedDistance then
+                    closestUnvisitedDistance = distance
+                    closestUnvisitedATM = atm
+                end
+            end
+        end
+    end
+
+    if closestUnvisitedATM then
+        return closestUnvisitedATM
+    end
+
+    if hasAnyUnvisitedReady and excludedATM and self:IsATMValid(excludedATM) and self:IsATMReady(excludedATM) and not self:HasVisitedATM(excludedATM) then
+        return excludedATM
+    end
+
+    if not closestAnyATM then
+        return nil
+    end
+
+    self:DebugLog("Visited all ATM resetting cycle")
+    self:ResetATMVisited()
+
+    local resetClosestATM = nil
+    local resetClosestDistance = math.huge
+    for _, atm in ipairs(atmCache) do
+        if self:IsATMValid(atm) and self:IsATMReady(atm) and atm ~= excludedATM then
+            local distance = (atm.Position - characterRoot.Position).Magnitude
+            if distance < resetClosestDistance then
+                resetClosestDistance = distance
+                resetClosestATM = atm
+            end
+        end
+    end
+
+    if resetClosestATM then
+        return resetClosestATM
+    end
+
+    if excludedATM and self:IsATMValid(excludedATM) and self:IsATMReady(excludedATM) then
+        return excludedATM
+    end
+
+    return nil
+end
+
+function UI:RetargetAutoFarm(excludedATM)
+    self.autoFarmTarget = self:GetClosestATM(excludedATM)
+    self.autoFarmLastGoal = nil
+    self.autoFarmWaitUntil = 0
+    self.autoFarmCashTarget = nil
+    if self.autoFarmTarget then
+        self:DebugLog("Targeting ATM: " .. SafeName(self.autoFarmTarget))
+    else
+        self:DebugWarnThrottle("no_atm_target", 1.5, "No valid ATM target found")
+    end
+    return self.autoFarmTarget
+end
+
+function UI:MoveTowardATM(atm, deltaTime)
+    local characterRoot = self:GetCharacterRoot()
+    if not characterRoot or not self:IsATMValid(atm) then
+        if not characterRoot then
+            self:DebugWarnThrottle("move_missing_character_root", 2, "Cannot move: HumanoidRootPart missing on local character")
+        end
+        return false
+    end
+
+    local targetPosition = atm.Position
+    self.autoFarmLastGoal = targetPosition
+
+    pcall(function()
+        characterRoot.Velocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        characterRoot.RotVelocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        characterRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        characterRoot.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    end)
+
+    local currentPosition = characterRoot.Position
+    local offset = targetPosition - currentPosition
+    local distance = offset.Magnitude
+    if distance <= 2 then
+        return true
+    end
+
+    local moveSpeed = self:GetTweenSpeed()
+    local stepDistance = math.max(0.01, (deltaTime or 0) * moveSpeed)
+    local nextPosition
+    if stepDistance >= distance then
+        nextPosition = targetPosition
+    else
+        nextPosition = currentPosition + offset.Unit * stepDistance
+    end
+
+    characterRoot.CFrame = CFrame.new(nextPosition.X, nextPosition.Y, nextPosition.Z)
+    return false
+end
+
+function UI:HandleAutoFarm(deltaTime)
+    if not self:IsAutoFarmEnabled() then
+        self:SetCharacterNoclip(false)
+        self.autoFarmTarget = nil
+        self.autoFarmLastGoal = nil
+        self.autoFarmWaitUntil = 0
+        self.autoFarmLastUpdate = 0
+        self.autoFarmLastClick = 0
+        self.autoFarmCashTarget = nil
+        self.autoFarmLastInteract = 0
+        self:ResetATMVisited()
+        return
+    end
+
+    self:SetCharacterNoclip(true)
+
+    local now = tick()
+    if (now - self.autoFarmLastUpdate) < self.autoFarmUpdateInterval then
+        return
+    end
+    self.autoFarmLastUpdate = now
+
+    local characterRoot = self:GetCharacterRoot()
+    local humanoid = self:GetCharacterHumanoid()
+    if not characterRoot or not humanoid or humanoid.Health <= 0 then
+        self:SetCharacterNoclip(false)
+        if not characterRoot then
+            self:DebugWarnThrottle("autofarm_no_character_root", 2, "Auto Farm stopped: local HumanoidRootPart missing")
+        elseif not humanoid then
+            self:DebugWarnThrottle("autofarm_no_humanoid", 2, "Auto Farm stopped: local Humanoid missing")
+        elseif humanoid.Health <= 0 then
+            self:DebugWarnThrottle("autofarm_dead", 2, "Auto Farm paused: local humanoid is dead")
+        end
+        return
+    end
+
+    if not self:IsATMValid(self.autoFarmTarget) then
+        if self.autoFarmTarget then
+            self:DebugLog("Current ATM became invalid: " .. SafeName(self.autoFarmTarget))
+        end
+        self:RetargetAutoFarm(nil)
+    end
+
+    if self.autoFarmTarget then
+        if not self:IsATMReady(self.autoFarmTarget) then
+            if not self.autoFarmCashTarget or not self:IsCashValid(self.autoFarmCashTarget) then
+                self.autoFarmCashTarget = self:GetNearbyCash(nil)
+                if self.autoFarmCashTarget then
+                    self:DebugLog("Collecting nearby cash: " .. SafeName(self.autoFarmCashTarget))
+                end
+            end
+
+            if self.autoFarmCashTarget and self:IsCashValid(self.autoFarmCashTarget) then
+                local reachedCash = self:MoveTowardATM(self.autoFarmCashTarget, self.autoFarmUpdateInterval)
+                if reachedCash then
+                    self:PressInteractKey()
+                    self.autoFarmCashTarget = self:GetNearbyCash(self.autoFarmCashTarget)
+                    if self.autoFarmCashTarget then
+                        self:DebugLog("Collecting next nearby cash: " .. SafeName(self.autoFarmCashTarget))
+                    end
+                end
+                return
+            end
+
+            local previousATM = self.autoFarmTarget
+            self:DebugLog("ATM robbed and no nearby cash left, moving to next")
+            self:MarkATMVisited(previousATM)
+            self:RetargetAutoFarm(previousATM)
+            return
+        end
+
+        self.autoFarmCashTarget = nil
+        local reachedATM = self:MoveTowardATM(self.autoFarmTarget, self.autoFarmUpdateInterval)
+        if reachedATM then
+            self:ClickATM()
+        end
+    end
+end
+
+function UI:HandleControlClick(control)
+    if control.type == "toggle" or control.type == "checkbox" then
+        control.value = not control.value
+        if control.id == "auto_farm_toggle" then
+            if control.value then
+                self:DebugLog("Auto Farm enabled")
+                self:ResetAutoFarmRoute()
+                self:RetargetAutoFarm(nil)
+            else
+                self:DebugLog("Auto Farm disabled")
+                self:SetCharacterNoclip(false)
+                self:ResetAutoFarmRoute()
+            end
+        end
+        self:SaveConfig(control.id == "auto_save_config")
+    elseif control.type == "button" then
+        control.flashUntil = tick() + 0.35
+        if control.id == "cash_test_button" then
+            self:RunCashTest()
+        elseif control.id == "get_tools_button" then
+            self:PrintLocalTools()
+        end
+    elseif control.type == "dropdown_single" or control.type == "dropdown_multi" then
+        self:ToggleDropdown(control.id)
+        return
+    end
+
+    self:MarkCurrentTabDirty()
+end
+
+function UI:HandleDropdownOption(control, option)
+    if control.type == "dropdown_single" then
+        control.value = option
+        self.expandedDropdown = nil
+    else
+        control.selected = control.selected or {}
+        control.selected[option] = not control.selected[option]
+    end
+
+    if control.id == "target_type_filter" then
+        self:ResetAutoFarmRoute()
+        if self:IsAutoFarmEnabled() then
+            self:RetargetAutoFarm(nil)
+        end
+    end
+
+    self:UpdateScrollLimit()
+    self:MarkCurrentTabDirty()
+    self:SaveConfig(false)
+end
+
+function UI:GetAccentColor(control)
+    if control.accent == "warm" then
+        return Theme.accentWarm
+    end
+    return Theme.accent
+end
+
+function UI:GetHitboxSlider()
+    local autoFarmControls = self.controls[2] or {}
+    for _, control in ipairs(autoFarmControls) do
+        if control.id == "hitbox_expander" then
+            return control
+        end
+    end
+
+    return nil
+end
+
+function UI:GetTweenSpeed()
+    local control = self:GetControl(4, "tween_speed")
+    if control and control.value then
+        return control.value
+    end
+
+    return self.autoFarmSpeed or 40
+end
+
+function UI:GetPlayerHitboxParts(player)
+    local character = player and player.Character
+    if not character then
+        return {}
+    end
+
+    local parts = {}
+    local seen = {}
+
+    for _, partName in ipairs(HitboxBodyPartNames) do
+        local part = character:FindFirstChild(partName)
+        if part and part:IsA("BasePart") and not seen[part] then
+            seen[part] = true
+            table.insert(parts, part)
+        end
+    end
+
+    return parts
+end
+
+function UI:RestorePlayerHitbox(player)
+    local cached = self.hitboxCache[player]
+    if not cached then
+        self.hitboxCache[player] = nil
+        return
+    end
+
+    for _, entry in ipairs(cached) do
+        if entry.part and entry.part.Parent then
+            pcall(function()
+                entry.part.Size = entry.size
+            end)
+            pcall(function()
+                entry.part.CanCollide = entry.canCollide
+            end)
+        end
+    end
+
+    self.hitboxCache[player] = nil
+end
+
+function UI:ApplyHitboxExpander()
+    local slider = self:GetHitboxSlider()
+    if not slider then
+        return
+    end
+
+    local multiplier = slider.value or 1
+    local now = tick()
+    local shouldForce = self.lastHitboxMultiplier ~= multiplier
+
+    if multiplier <= 1 then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                self:RestorePlayerHitbox(player)
+            end
+        end
+        self.hitboxLastApply = now
+        self.lastHitboxMultiplier = multiplier
+        return
+    end
+
+    if not shouldForce and (now - self.hitboxLastApply) < self.hitboxApplyInterval then
+        return
+    end
+
+    self.hitboxLastApply = now
+    self.lastHitboxMultiplier = multiplier
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local parts = self:GetPlayerHitboxParts(player)
+
+            if multiplier <= 1 then
+                self:RestorePlayerHitbox(player)
+            elseif #parts > 0 then
+                local cached = self.hitboxCache[player]
+                if not cached then
+                    cached = {}
+                    self.hitboxCache[player] = cached
+                end
+
+                local cachedByPart = {}
+                for _, entry in ipairs(cached) do
+                    if entry.part then
+                        cachedByPart[entry.part] = entry
+                    end
+                end
+
+                for _, part in ipairs(parts) do
+                    if not cachedByPart[part] then
+                        local entry = {
+                            part = part,
+                            size = part.Size,
+                            canCollide = part.CanCollide,
+                        }
+                        table.insert(cached, entry)
+                        cachedByPart[part] = entry
+                    end
+                end
+
+                for _, entry in ipairs(cached) do
+                    local part = entry.part
+                    if part and part.Parent then
+                        local baseSize = entry.size
+                        local expandedX = math.max(baseSize.X, multiplier)
+                        local expandedY = math.max(baseSize.Y, multiplier)
+                        local expandedZ = math.max(baseSize.Z, multiplier)
+
+                        local currentSize = part.Size
+                        local needsResize = shouldForce
+                            or not currentSize
+                            or currentSize.X ~= expandedX
+                            or currentSize.Y ~= expandedY
+                            or currentSize.Z ~= expandedZ
+
+                        if needsResize then
+                            pcall(function()
+                                part.Size = Vector3.new(expandedX, expandedY, expandedZ)
+                            end)
+                        end
+
+                        local currentCanCollide = part.CanCollide
+                        if currentCanCollide ~= false then
+                            pcall(function()
+                                part.CanCollide = false
+                            end)
+                        end
+                    end
+                end
+            else
+                self:RestorePlayerHitbox(player)
+            end
+        end
+    end
+end
+
+function UI:ResolveHover()
+    local mousePos = self:GetMouseLocation()
+    local hovered = nil
+    local bestPriority = -math.huge
+
+    for _, hitbox in ipairs(self.hitboxes) do
+        if self:PointInRect(mousePos.X, mousePos.Y, hitbox.x, hitbox.y, hitbox.w, hitbox.h) then
+            if hitbox.priority >= bestPriority then
+                hovered = hitbox.id
+                bestPriority = hitbox.priority
+            end
+        end
+    end
+
+    if hovered ~= self.hoveredId then
+        local previous = self.hoveredId
+        self.hoveredId = hovered
+
+        if string.match(previous or "", "^tab_") or string.match(hovered or "", "^tab_") then
+            self:MarkShellDirty()
+            self:MarkCurrentTabDirty()
+        else
+            self:MarkCurrentTabDirty()
+        end
+    end
+end
+
+function UI:HandleInput()
+    local mousePos = self:GetMouseLocation()
+    local mousePressed = self:IsLeftMousePressed()
+
+    self:ResolveHover()
+
+    if mousePressed and not self.lastMousePressed then
+        if self:IsMouseOver(self.window.x, self.window.y, self.window.width, 40) then
+            self.draggingWindow = true
+            self.dragOffsetX = mousePos.X - self.window.x
+            self.dragOffsetY = mousePos.Y - self.window.y
+        end
+
+        for index = #self.hitboxes, 1, -1 do
+            local hitbox = self.hitboxes[index]
+            if self:PointInRect(mousePos.X, mousePos.Y, hitbox.x, hitbox.y, hitbox.w, hitbox.h) then
+                if hitbox.onClick then
+                    hitbox.onClick()
+                end
+                break
+            end
+        end
+    elseif not mousePressed then
+        self.draggingWindow = false
+        self.draggingScroll = false
+        self.draggingSlider = false
+        self.activeSlider = nil
+    end
+
+    if self.draggingWindow and mousePressed then
+        local newX = mousePos.X - self.dragOffsetX
+        local newY = mousePos.Y - self.dragOffsetY
+        if newX ~= self.window.x or newY ~= self.window.y then
+            self.window.x = newX
+            self.window.y = newY
+            self:MarkShellDirty()
+            self:MarkCurrentTabDirty()
+        end
+    end
+
+    if self.draggingScroll and mousePressed and self.scroll.max > 0 then
+        local _, trackY, _, trackH, thumbY, thumbH = self:GetScrollbarMetrics()
+        local available = math.max(1, trackH - thumbH)
+        local relative = math.clamp(mousePos.Y - trackY - self.scrollDragOffset, 0, available)
+        local newOffset = (relative / available) * self.scroll.max
+        if math.abs(newOffset - self.scroll.offset) > 0.5 then
+            self.scroll.offset = newOffset
+            self:MarkCurrentTabDirty()
+        end
+    end
+
+    if self.draggingSlider and mousePressed and self.activeSlider then
+        self:SetSliderFromMouse(self.activeSlider, mousePos.X)
+    end
+
+    self.lastMousePressed = mousePressed
+end
+
+function UI:HandleHotkeys()
+    if self:IsKeyPressed(VK_Z) then
+        local now = tick()
+        if now - self.lastToggleTick > 0.2 then
+            self.uiVisible = not self.uiVisible
+            self.lastToggleTick = now
+            self.hoveredId = nil
+            self.needsRedraw = true
+
+            if not self.uiVisible then
+                self.hitboxes = {}
+                self:HideBucket(self.shellBucket)
+                for _, bucket in ipairs(self.tabBuckets) do
+                    self:HideBucket(bucket)
+                end
+            else
+                self:MarkShellDirty()
+                self:MarkCurrentTabDirty()
+            end
+        end
+    end
+end
+
+function UI:HandleTransientEffects()
+    local now = tick()
+    for tabIndex, tabControls in ipairs(self.controls) do
+        for _, control in ipairs(tabControls) do
+            if control.type == "button" and control.flashUntil and now >= control.flashUntil then
+                control.flashUntil = nil
+                self:MarkTabDirty(tabIndex)
+                return
+            end
+        end
+    end
+end
+
+function UI:DrawToggle(bucket, control, x, y, w, h)
+    local enabled = control.value == true
+    local boxSize = h
+    local radius = math.max(2, math.floor(boxSize / 4))
+
+    if enabled then
+        self:CreateSquare(bucket, x + radius, y, boxSize - (radius * 2), boxSize, Theme.accent, 1, true)
+        self:CreateSquare(bucket, x, y + radius, boxSize, boxSize - (radius * 2), Theme.accent, 1, true)
+        self:CreateCircle(bucket, x + radius, y + radius, radius, Theme.accent, 1, true)
+        self:CreateCircle(bucket, x + boxSize - radius, y + radius, radius, Theme.accent, 1, true)
+        self:CreateCircle(bucket, x + radius, y + boxSize - radius, radius, Theme.accent, 1, true)
+        self:CreateCircle(bucket, x + boxSize - radius, y + boxSize - radius, radius, Theme.accent, 1, true)
+    else
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, Theme.panelAlt, 1, true)
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, Theme.border, 1, false, 1)
+    end
+end
+
+function UI:DrawCheckbox(bucket, control, x, y, w, h)
+    local enabled = control.value == true
+    self:CreateSquare(bucket, x, y, w, h, Theme.panelAlt, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, enabled and Theme.accent or Theme.border, 1, false, 1)
+    if enabled then
+        self:CreateText(bucket, "x", x + 4, y - 1, Theme.text, 14, false)
+    end
+end
+
+function UI:DrawButton(bucket, control, x, y, w, h)
+    local flashing = control.flashUntil and tick() < control.flashUntil
+    local accent = self:GetAccentColor(control)
+    self:CreateSquare(bucket, x, y, w, h, flashing and Theme.accentSoft or Theme.card, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, accent, 1, false, 1)
+    self:CreateText(bucket, control.label, x + 10, y + 6, Theme.text, 12, false)
+end
+
+function UI:DrawDropdown(bucket, control, x, y, w, h)
+    local expanded = self.expandedDropdown == control.id
+    self:CreateSquare(bucket, x, y, w, h, Theme.panel, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, expanded and Theme.accent or Theme.border, 1, false, 1)
+    self:CreateText(bucket, self:GetDropdownSelectionText(control), x + 10, y + 5, Theme.text, 12, false)
+    self:CreateText(bucket, "v", x + w - 16, y + 4, Theme.text, 12, false)
+end
+
+function UI:DrawSlider(bucket, control, x, y, w, h)
+    local sliderX = x
+    local sliderY = y + 9
+    local sliderW = w
+    local sliderH = 6
+    local percent = self:GetSliderPercent(control)
+    local fillW = math.max(0, math.floor(sliderW * percent))
+    local knobX = sliderX + fillW
+
+    control._sliderX = sliderX
+    control._sliderW = sliderW
+
+    self:CreateSquare(bucket, sliderX, sliderY, sliderW, sliderH, Theme.panelAlt, 1, true)
+    self:CreateSquare(bucket, sliderX, sliderY, sliderW, sliderH, Theme.border, 1, false, 1)
+    if fillW > 0 then
+        self:CreateSquare(bucket, sliderX, sliderY, fillW, sliderH, Theme.accent, 1, true)
+    end
+    self:CreateCircle(bucket, knobX, sliderY + math.floor(sliderH / 2), 6, Theme.accent, 1, true)
+    self:CreateText(bucket, tostring(control.value), sliderX + sliderW + 10, y + 2, Theme.text, 12, false)
+end
+
+function UI:BuildShell()
+    local bucket = self.shellBucket
+    self:ClearBucket(bucket)
+
+    local x = self.window.x
+    local y = self.window.y
+    local w = self.window.width
+    local h = self.window.height
+    local sw = self.window.sidebarWidth
+
+    self:CreateSquare(bucket, x, y, w, h, Theme.bg, 1, true)
+    self:CreateSquare(bucket, x, y, sw, h, Theme.sidebar, 1, true)
+    self:CreateSquare(bucket, x + sw, y, w - sw, h, Theme.panel, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, Theme.border, 1, false, 1)
+    self:CreateSquare(bucket, x, y, w, 3, Theme.accent, 1, true)
+    self:CreateLine(bucket, x + sw, y + 4, x + sw, y + h - 2, Theme.border, 1, 1)
+
+    self:CreateSquare(bucket, x + 16, y + 18, 38, 38, Theme.accent, 1, true)
+    self:CreateText(bucket, "W", x + 29, y + 26, Theme.success, 18, false)
+    self:CreateText(bucket, "Windy", x + 62, y + 24, Theme.text, 15, false)
+    self:CreateText(bucket, "Baddies", x + 62, y + 40, Theme.textDim, 13, false)
+    self:CreateText(bucket, "TABS", x + 24, y + 82, Theme.text, 15, false)
+    self:CreateText(bucket, "Z = toggle", x + w - 78, y + h - 16, Theme.textDim, 11, false)
+
+    local startX = x + 16
+    local tabBaseY = y + 108
+    for index, tab in ipairs(self.tabs) do
+        local tabX = startX
+        local tabY = tabBaseY + ((index - 1) * 34)
+        local tabWidth = sw - 28
+        local selected = index == self.selectedTab
+        local hovered = self.hoveredId == ("tab_" .. index)
+
+        self:CreateSquare(bucket, tabX, tabY, tabWidth, 28, selected and Theme.accent or Theme.sidebar, 1, true)
+        self:CreateSquare(bucket, tabX, tabY, tabWidth, 28, hovered and Theme.accent or Theme.border, 1, false, 1)
+        self:CreateText(bucket, tab.name, tabX + 10, tabY + 6, Theme.text, 13, false)
+
+        self:RegisterHitbox("tab_" .. index, tabX, tabY, tabWidth, 28, function()
+            if self.selectedTab ~= index then
+                self:HideBucket(self.tabBuckets[self.selectedTab])
+                self.selectedTab = index
+                self.expandedDropdown = nil
+                self.scroll.offset = 0
+                self:UpdateScrollLimit()
+                self:MarkShellDirty()
+                self:MarkCurrentTabDirty()
+            end
+        end, 1)
+    end
+
+    bucket.built = true
+    self:ShowBucket(bucket)
+end
+
+function UI:BuildActiveTab()
+    local bucket = self.tabBuckets[self.selectedTab]
+    self:ClearBucket(bucket)
+
+    local x, y, width, height = self:GetContentBounds()
+    local cardX = x + 12
+    local cardW = width - 28
+    local drawY = y + 10 - self.scroll.offset
+    local bottomY = y + height
+
+    for _, control in ipairs(self:GetActiveControls()) do
+        local expanded = self.expandedDropdown == control.id
+        local extraHeight = expanded and ((#control.options or {}) * 26) + 8 or 0
+        local cardH = ((control.type == "slider") and 46 or 34) + extraHeight
+
+        local baseCardHeight = cardH - extraHeight
+        if drawY + baseCardHeight >= y and drawY <= bottomY then
+            if control.type == "stat" then
+                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.card, 1, true)
+                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.border, 1, false, 1)
+                self:CreateText(bucket, control.label, cardX + 10, drawY + 9, Theme.text, 13, false)
+                self:CreateText(bucket, tostring(control.value or "-"), cardX + cardW - 150, drawY + 9, Theme.textDim, 13, false)
+            else
+                local hovered = self.hoveredId == control.id
+                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.card, 1, true)
+                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, hovered and Theme.accentSoft or Theme.border, 1, false, 1)
+                self:CreateText(bucket, control.label, cardX + 10, drawY + 10, Theme.text, 13, false)
+
+                if control.type == "toggle" then
+                    self:DrawToggle(bucket, control, cardX + cardW - 44, drawY + 7, 24, 16)
+                elseif control.type == "checkbox" then
+                    self:DrawCheckbox(bucket, control, cardX + cardW - 28, drawY + 7, 16, 16)
+                elseif control.type == "button" then
+                    self:DrawButton(bucket, control, cardX + cardW - 122, drawY + 5, 110, 24)
+                elseif control.type == "slider" then
+                    self:DrawSlider(bucket, control, cardX + 10, drawY + 26, cardW - 70, 18)
+                else
+                    self:DrawDropdown(bucket, control, cardX + 154, drawY + 5, cardW - 166, 24)
+                end
+
+                if control.type == "slider" then
+                    self:RegisterHitbox(control.id, cardX + 10, drawY + 20, cardW - 50, 20, function()
+                        self.draggingSlider = true
+                        self.activeSlider = control
+                        self:SetSliderFromMouse(control, self:GetMouseLocation().X)
+                    end, 2)
+                else
+                    self:RegisterHitbox(control.id, cardX, drawY, cardW, 34, function()
+                        self:HandleControlClick(control)
+                    end, 1)
+                end
+
+                if expanded then
+                    local listY = drawY + 34
+                    local listH = #control.options * 26
+                    self:CreateSquare(bucket, cardX, listY, cardW, listH + 4, Theme.shell, 1, true)
+                    self:CreateSquare(bucket, cardX, listY, cardW, listH + 4, Theme.border, 1, false, 1)
+
+                    for optionIndex, option in ipairs(control.options) do
+                        local rowY = listY + ((optionIndex - 1) * 26)
+                        local selected = control.type == "dropdown_single"
+                            and control.value == option
+                            or (control.selected and control.selected[option] == true)
+
+                        self:CreateSquare(bucket, cardX, rowY, cardW, 24, selected and Theme.accentSoft or Theme.panel, 1, true)
+                        self:CreateSquare(bucket, cardX, rowY, cardW, 24, selected and Theme.accent or Theme.border, 1, false, 1)
+                        self:CreateText(bucket, option, cardX + 10, rowY + 5, Theme.text, 12, false)
+                        self:CreateText(bucket, selected and "x" or "", cardX + cardW - 18, rowY + 4, Theme.text, 12, false)
+
+                        self:RegisterHitbox(control.id .. "_opt_" .. optionIndex, cardX, rowY, cardW, 24, function()
+                            self:HandleDropdownOption(control, option)
+                        end, 2)
+                    end
+                end
+            end
+        end
+
+        drawY = drawY + cardH + 8
+    end
+
+    local scrollbarX, scrollbarY, scrollbarW, scrollbarH, thumbY, thumbH = self:GetScrollbarMetrics()
+    self:CreateSquare(bucket, scrollbarX, scrollbarY, scrollbarW, scrollbarH, Theme.shell, 1, true)
+    self:CreateSquare(bucket, scrollbarX, scrollbarY, scrollbarW, scrollbarH, Theme.border, 1, false, 1)
+
+    if self.scroll.max <= 0 then
+        self:CreateSquare(bucket, scrollbarX + 1, scrollbarY + 1, scrollbarW - 2, scrollbarH - 2, Theme.panelAlt, 1, true)
+    else
+        self:CreateSquare(bucket, scrollbarX + 1, thumbY, scrollbarW - 2, thumbH, Theme.accent, 1, true)
+        self:RegisterHitbox("scrollbar_thumb", scrollbarX - 10, thumbY - 2, scrollbarW + 20, thumbH + 4, function()
+            self.draggingScroll = true
+            self.scrollDragOffset = self:GetMouseLocation().Y - thumbY
+        end, 3)
+    end
+
+    bucket.built = true
+    self:ShowBucket(bucket)
+end
+
+function UI:Render()
+    self.hitboxes = {}
+
+    if not self.uiVisible then
+        self:HideBucket(self.shellBucket)
+        for _, bucket in ipairs(self.tabBuckets) do
+            self:HideBucket(bucket)
+        end
+        self.needsRedraw = false
+        return
+    end
+
+    self:UpdateScrollLimit()
+
+    for tabIndex, bucket in ipairs(self.tabBuckets) do
+        if tabIndex ~= self.selectedTab then
+            self:HideBucket(bucket)
+        end
+    end
+
+    self:BuildShell()
+    self.shellDirty = false
+    self:BuildActiveTab()
+    self.tabDirty[self.selectedTab] = false
+
+    self.needsRedraw = false
+end
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    if not UI.isRunning then
+        return
+    end
+
+    local currentCharacter = LocalPlayer and LocalPlayer.Character or nil
+    if currentCharacter ~= UI.lastCharacter then
+        UI.lastCharacter = currentCharacter
+        UI.noclipEnabled = false
+        UI:SetCombatLeftMouseHeld(false)
+        UI:SetCombatInteractHeld(false)
+        UI.combatRetreating = false
+        UI.combatRetreatAnchor = nil
+        UI.combatStomping = false
+        UI.combatStompStartedAt = 0
+        UI.combatStompTarget = nil
+        if UI:IsAutoFarmEnabled() then
+            UI:SetCharacterNoclip(true)
+        else
+            UI:SetCharacterNoclip(false)
+        end
+    end
+
+    local hotkeyOk, hotkeyError = pcall(function()
+        UI:HandleHotkeys()
+    end)
+    if not hotkeyOk then
+        UI:DebugWarn("HandleHotkeys error: " .. tostring(hotkeyError))
+    end
+
+    local statsOk, statsError = pcall(function()
+        UI:UpdateHomeStats()
+    end)
+    if not statsOk then
+        UI:DebugWarn("UpdateHomeStats error: " .. tostring(statsError))
+    end
+
+    local farmOk, farmError = pcall(function()
+        UI:HandleAutoFarm(deltaTime)
+    end)
+    if not farmOk then
+        UI:DebugWarn("HandleAutoFarm error: " .. tostring(farmError))
+    end
+
+    local combatOk, combatError = pcall(function()
+        UI:HandleCombat(deltaTime)
+    end)
+    if not combatOk then
+        UI:DebugWarn("HandleCombat error: " .. tostring(combatError))
+    end
+
+    local hitboxOk, hitboxError = pcall(function()
+        UI:ApplyHitboxExpander()
+    end)
+    if not hitboxOk then
+        UI:DebugWarn("ApplyHitboxExpander error: " .. tostring(hitboxError))
+    end
+
+    if UI.uiVisible then
+        local inputOk, inputError = pcall(function()
+            UI:HandleInput()
+        end)
+        if not inputOk then
+            UI:DebugWarn("HandleInput error: " .. tostring(inputError))
+        end
+
+        local transientOk, transientError = pcall(function()
+            UI:HandleTransientEffects()
+        end)
+        if not transientOk then
+            UI:DebugWarn("HandleTransientEffects error: " .. tostring(transientError))
+        end
+    end
+
+    if UI.needsRedraw then
+        local renderOk, renderError = pcall(function()
+            UI:Render()
+        end)
+        if not renderOk then
+            UI:DebugWarn("Render error: " .. tostring(renderError))
+        end
+    end
+end)
+
+pcall(function()
+    UI:LoadOffsets()
+end)
+
+pcall(function()
+    UI:LoadAllTimeMoneyMade()
+end)
+
+pcall(function()
+    UI:LoadConfig()
+end)
+
+pcall(function()
+    UI:UpdateHomeStats()
+end)
+
+UI:Render()
