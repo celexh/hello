@@ -277,6 +277,13 @@ local UI = {
                 description = "",
                 value = true,
             },
+            {
+                id = "discord_button",
+                type = "button",
+                label = "Discord",
+                description = "",
+                accent = "accent",
+            },
         },
     },
 }
@@ -2062,6 +2069,11 @@ function UI:HandleControlClick(control)
             self:RunCashTest()
         elseif control.id == "get_tools_button" then
             self:PrintLocalTools()
+        elseif control.id == "discord_button" then
+            if type(setclipboard) == "function" then
+                pcall(setclipboard, "https://discord.gg/Hu7BQwkJ3y")
+            end
+            self:NotifyPlayer("Discord link copied to clipboard", "Windy", 3)
         end
     elseif control.type == "dropdown_single" or control.type == "dropdown_multi" then
         self:ToggleDropdown(control.id)
