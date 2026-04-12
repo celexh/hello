@@ -1315,14 +1315,8 @@ function UI:SetLocalWalkSpeed(speed)
         return
     end
 
-    if self.lastAppliedWalkSpeed == speed then
-        return
-    end
-
-    pcall(function()
-        memory_write("float", hum.Address + 0x1D4, speed)
-        memory_write("float", hum.Address + 0x3BC, speed)
-    end)
+    memory_write("float", hum.Address + 0x1D4, speed)
+    memory_write("float", hum.Address + 0x3BC, speed)
 
     self.lastAppliedWalkSpeed = speed
 end
