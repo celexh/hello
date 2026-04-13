@@ -2134,7 +2134,7 @@ function UI:BuildActiveTab()
 
     if self.scroll.max > 0 and self.scroll.offset < (self.scroll.max - 2) then
         local indicatorY = y + height - 14
-        self:CreateText(bucket, "v", x + math.floor((width - 16) * 0.5), indicatorY, Theme.textDim, 12, true)
+        self:CreateText(bucket, "Scroll", x + math.floor((width - 16) * 0.5), indicatorY, Theme.textDim, 12, true)
     end
 
     if self.scroll.max <= 0 then
