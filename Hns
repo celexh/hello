@@ -13,17 +13,21 @@ local LocalPlayer = Players.LocalPlayer
 local LocalMouse = LocalPlayer and LocalPlayer:GetMouse() or nil
 
 local Theme = {
-    bg = Color3.fromRGB(23, 24, 29),
-    shell = Color3.fromRGB(29, 31, 37),
-    sidebar = Color3.fromRGB(34, 36, 42),
-    panel = Color3.fromRGB(26, 27, 33),
-    panelAlt = Color3.fromRGB(37, 39, 46),
-    card = Color3.fromRGB(33, 35, 41),
-    border = Color3.fromRGB(45, 47, 54),
+    bg = Color3.fromRGB(22, 23, 28),
+    shell = Color3.fromRGB(27, 29, 35),
+    sidebar = Color3.fromRGB(31, 33, 39),
+    panel = Color3.fromRGB(31, 33, 39),
+    panelAlt = Color3.fromRGB(39, 41, 49),
+    card = Color3.fromRGB(37, 39, 47),
+    border = Color3.fromRGB(47, 50, 58),
+    borderSoft = Color3.fromRGB(40, 42, 49),
+    topHighlight = Color3.fromRGB(59, 62, 72),
+    cardInner = Color3.fromRGB(43, 45, 54),
     accent = Color3.fromRGB(54, 248, 87),
     accentSoft = Color3.fromRGB(40, 180, 70),
-    text = Color3.fromRGB(240, 240, 242),
-    textDim = Color3.fromRGB(156, 159, 168),
+    text = Color3.fromRGB(242, 243, 246),
+    textDim = Color3.fromRGB(161, 165, 174),
+    textMuted = Color3.fromRGB(128, 132, 141),
     success = Color3.fromRGB(255, 255, 255),
 }
 
@@ -59,15 +63,32 @@ local function NewBucket()
         objects = {},
         visible = false,
         built = false,
+        deferVisible = false,
     }
 end
 
 local UI = {
     isRunning = true,
+    isBooting = true,
+    bootReady = false,
+    bootStartedAt = tick(),
+    bootDuration = 4 + (math.random() * 2),
+    bootPanelScale = 0.4,
+    bootVisualProgress = 0,
+    bootVisualTarget = 0.06,
     uiVisible = true,
+    uiAlpha = 1,
+    uiOffset = 0,
+    renderX = nil,
+    renderY = nil,
+    renderScale = 1,
+    contentAlpha = 1,
+    contentOffset = 0,
+    activeTabHighlightY = 0,
+    animatedScrollThumbY = nil,
     needsRedraw = true,
     shellDirty = true,
-    tabDirty = {true, true, true, true},
+    tabDirty = {true, true, true, true, true},
     hitboxes = {},
     hoveredId = nil,
     lastMousePressed = false,
@@ -84,6 +105,7 @@ local UI = {
     lastConfigSaveTick = nil,
     espEntries = {},
     coinFarmTarget = nil,
+    autoKillTarget = nil,
     tweenSpeedWarned = false,
     coinFarmNoClipActive = false,
     creditCache = {},
@@ -92,12 +114,25 @@ local UI = {
     selectedTab = 1,
     configFolderName = "WindyHideAndSeek",
     configFileName = "config.json",
+    logoImageUrl = "https://static.wikia.nocookie.net/bee-swarm-simulator/images/8/85/Windy_Bee.png/revision/latest?cb=20230415210459",
+    logoImageData = nil,
+    logoImageFailed = false,
+    logoImageUnsupported = false,
+    animationState = {
+        tabHover = {},
+        tabActive = {},
+        controlHover = {},
+        dropdownOpen = {},
+        sliderFill = {},
+        toggleFill = {},
+        checkboxFill = {},
+    },
 
     window = {
         x = 220,
         y = 140,
         width = 620,
-        height = 340,
+        height = 352,
         headerHeight = 42,
         footerHeight = 20,
         padding = 16,
@@ -110,7 +145,9 @@ local UI = {
     },
 
     shellBucket = NewBucket(),
+    loadingBucket = NewBucket(),
     tabBuckets = {
+        NewBucket(),
         NewBucket(),
         NewBucket(),
         NewBucket(),
@@ -120,6 +157,7 @@ local UI = {
     tabs = {
         {name = "HOME"},
         {name = "FARM"},
+        {name = "IT"},
         {name = "MISC"},
         {name = "SETTINGS"},
     },
@@ -135,24 +173,52 @@ local UI = {
             {id = "farm_coins_toggle", type = "toggle", label = "Farm Coins", description = "", value = false},
         },
         {
+            {id = "auto_kill_players_toggle", type = "toggle", label = "Auto Kill Players", description = "", value = false},
+        },
+        {
             {id = "it_esp_toggle", type = "toggle", label = "IT ESP", description = "", value = false},
             {id = "hider_esp_toggle", type = "toggle", label = "Hider ESP", description = "", value = false},
+            {id = "teleport_to_spawn_button", type = "button", label = "Teleport To Spawn", description = "", accent = "accent"},
         },
         {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
             {id = "tween_speed", type = "slider", label = "Tween Speed", description = "", min = 60, max = 200, step = 5, value = 60},
             {id = "accent_theme", type = "dropdown_single", label = "UI Color", description = "", value = "Green", options = {"Green", "Blue", "Red", "Orange", "Pink", "White"}},
+            {id = "ui_animations", type = "checkbox", label = "Animations", description = "", value = true},
             {id = "auto_save_config", type = "toggle", label = "Auto Save Config", description = "", value = true},
             {id = "discord_button", type = "button", label = "Discord", description = "", accent = "accent"},
         },
     },
 }
 
+local function LerpNumber(a, b, t)
+    return a + ((b - a) * t)
+end
+
+local function LerpColor(a, b, t)
+    return Color3.new(
+        LerpNumber(a.R, b.R, t),
+        LerpNumber(a.G, b.G, t),
+        LerpNumber(a.B, b.B, t)
+    )
+end
+
+local function SmoothFactor(speed, dt)
+    return 1 - math.exp(-(speed or 1) * (dt or (1 / 60)))
+end
+
 local VK_Z = 0x5A
 
 function UI:Track(bucket, obj)
+    if bucket and bucket.deferVisible then
+        obj.Visible = false
+    end
     table.insert(bucket.objects, obj)
     return obj
+end
+
+function UI:GetRenderTransparency(value)
+    return math.clamp((value or 1) * (self.renderAlpha or 1), 0, 1)
 end
 
 function UI:ClearBucket(bucket)
@@ -182,12 +248,14 @@ end
 
 function UI:CreateSquare(bucket, x, y, w, h, color, transparency, filled, thickness)
     local square = Drawing.new("Square")
-    square.Position = Vector2.new(x, y)
-    square.Size = Vector2.new(w, h)
+    local tx, ty = self:TransformPoint(x, y)
+    local tw, th = self:TransformSize(w, h)
+    square.Position = Vector2.new(tx, ty)
+    square.Size = Vector2.new(tw, th)
     square.Color = color
-    square.Transparency = transparency or 1
+    square.Transparency = self:GetRenderTransparency(transparency or 1)
     square.Filled = filled ~= false
-    square.Visible = true
+    square.Visible = not (bucket and bucket.deferVisible)
     if not square.Filled then
         square.Thickness = thickness or 1
     end
@@ -196,40 +264,366 @@ end
 
 function UI:CreateText(bucket, text, x, y, color, size, center)
     local label = Drawing.new("Text")
+    local tx, ty = self:TransformPoint(x, y)
+    local textReady = self.uiVisible
+        and math.abs((self.renderScale or 1) - 1) <= 0.001
+        and math.abs((self.uiAlpha or 1) - 1) <= 0.001
+        and math.abs((self.contentAlpha or 1) - 1) <= 0.001
+
     label.Text = text
-    label.Position = Vector2.new(x, y)
+    label.Position = Vector2.new(tx, ty)
     label.Color = color
-    label.Size = size or 13
+    label.Transparency = 1
+    label.Size = math.max(8, math.floor((size or 13) * (self.renderScale or 1) + 0.5))
     label.Center = center or false
     label.Outline = true
-    label.Visible = true
+    label.Visible = textReady and not (bucket and bucket.deferVisible)
     label.Font = 2
     return self:Track(bucket, label)
 end
 
+function UI:CreateRightText(bucket, text, rightX, y, color, size)
+    local content = tostring(text or "")
+    local fontSize = size or 13
+    local estimatedWidth = math.max(0, math.floor(#content * (fontSize * 0.52)))
+    return self:CreateText(bucket, content, rightX - estimatedWidth, y, color, fontSize, false)
+end
+
 function UI:CreateLine(bucket, fromX, fromY, toX, toY, color, transparency, thickness)
     local line = Drawing.new("Line")
-    line.From = Vector2.new(fromX, fromY)
-    line.To = Vector2.new(toX, toY)
+    local tx1, ty1 = self:TransformPoint(fromX, fromY)
+    local tx2, ty2 = self:TransformPoint(toX, toY)
+    line.From = Vector2.new(tx1, ty1)
+    line.To = Vector2.new(tx2, ty2)
     line.Color = color
-    line.Transparency = transparency or 1
-    line.Thickness = thickness or 1
-    line.Visible = true
+    line.Transparency = self:GetRenderTransparency(transparency or 1)
+    line.Thickness = math.max(1, math.floor((thickness or 1) * (self.renderScale or 1) + 0.5))
+    line.Visible = not (bucket and bucket.deferVisible)
     return self:Track(bucket, line)
 end
 
 function UI:CreateCircle(bucket, x, y, radius, color, transparency, filled, thickness)
     local circle = Drawing.new("Circle")
-    circle.Position = Vector2.new(x, y)
-    circle.Radius = radius
+    local tx, ty = self:TransformPoint(x, y)
+    circle.Position = Vector2.new(tx, ty)
+    circle.Radius = math.max(1, radius * (self.renderScale or 1))
     circle.Color = color
-    circle.Transparency = transparency or 1
+    circle.Transparency = self:GetRenderTransparency(transparency or 1)
     circle.Filled = filled ~= false
-    circle.Visible = true
+    circle.Visible = not (bucket and bucket.deferVisible)
     if not circle.Filled then
-        circle.Thickness = thickness or 1
+        circle.Thickness = math.max(1, math.floor((thickness or 1) * (self.renderScale or 1) + 0.5))
     end
     return self:Track(bucket, circle)
+end
+
+function UI:GetLogoImageData()
+    if self.logoImageUnsupported then
+        return nil
+    end
+
+    if self.logoImageData or self.logoImageFailed then
+        return self.logoImageData
+    end
+
+    local ok, data = pcall(function()
+        return game:HttpGet(self.logoImageUrl)
+    end)
+
+    if ok and type(data) == "string" and data ~= "" then
+        self.logoImageData = data
+        return self.logoImageData
+    end
+
+    self.logoImageFailed = true
+    return nil
+end
+
+function UI:IsLogoImageReady()
+    return self.logoImageData ~= nil or self.logoImageFailed == true or self.logoImageUnsupported == true
+end
+
+function UI:CreateImage(bucket, data, x, y, w, h, transparency)
+    if self.logoImageUnsupported then
+        return nil
+    end
+
+    local ok, image = pcall(Drawing.new, "Image")
+    if not ok or not image then
+        self.logoImageUnsupported = true
+        return nil
+    end
+
+    local tx, ty = self:TransformPoint(x, y)
+    local tw, th = self:TransformSize(w, h)
+    local applied = pcall(function()
+        image.Position = Vector2.new(tx, ty)
+        image.Size = Vector2.new(tw, th)
+        image.Visible = not (bucket and bucket.deferVisible)
+        image.Transparency = self:GetRenderTransparency(transparency or 1)
+        image.Data = data
+    end)
+
+    if not applied then
+        self.logoImageUnsupported = true
+        pcall(function()
+            image:Remove()
+        end)
+        return nil
+    end
+
+    return self:Track(bucket, image)
+end
+
+function UI:CreateRoundedBox(bucket, x, y, w, h, radius, color)
+    radius = math.floor(math.max(0, math.min(radius or 0, math.min(w, h) / 2)))
+    if radius <= 0 then
+        self:CreateSquare(bucket, x, y, w, h, color, 1, true)
+        return
+    end
+
+    self:CreateSquare(bucket, x + radius, y, w - (radius * 2), h, color, 1, true)
+    self:CreateSquare(bucket, x, y + radius, w, h - (radius * 2), color, 1, true)
+    self:CreateCircle(bucket, x + radius, y + radius, radius, color, 1, true)
+    self:CreateCircle(bucket, x + w - radius, y + radius, radius, color, 1, true)
+    self:CreateCircle(bucket, x + radius, y + h - radius, radius, color, 1, true)
+    self:CreateCircle(bucket, x + w - radius, y + h - radius, radius, color, 1, true)
+end
+
+function UI:AnimateValue(store, key, target, speed, dt, defaultValue)
+    local current = store[key]
+    if current == nil then
+        current = defaultValue ~= nil and defaultValue or target
+    end
+
+    local nextValue = LerpNumber(current, target, SmoothFactor(speed or 12, dt))
+    if math.abs(nextValue - target) < 0.001 then
+        nextValue = target
+    end
+
+    store[key] = nextValue
+    return nextValue, nextValue ~= target
+end
+
+function UI:GetAnimatedWindowYOffset()
+    return math.floor(self.uiOffset + 0.5)
+end
+
+function UI:GetViewportSize()
+    local camera = workspace and workspace.CurrentCamera or nil
+    if camera and camera.ViewportSize then
+        return camera.ViewportSize
+    end
+
+    return Vector2.new(1280, 720)
+end
+
+function UI:GetRenderWindowPosition()
+    return math.floor((self.renderX or self.window.x) + 0.5), math.floor((self.renderY or self.window.y) + 0.5)
+end
+
+function UI:GetTransformCenter()
+    local renderX, renderY = self:GetRenderWindowPosition()
+    local baseY = renderY + self:GetAnimatedWindowYOffset()
+    return renderX + (self.window.width * 0.5), baseY + (self.window.height * 0.5)
+end
+
+function UI:TransformPoint(x, y)
+    local scale = self.renderScale or 1
+    if math.abs(scale - 1) < 0.001 then
+        return x, y
+    end
+
+    local centerX, centerY = self:GetTransformCenter()
+    return centerX + ((x - centerX) * scale), centerY + ((y - centerY) * scale)
+end
+
+function UI:TransformSize(w, h)
+    local scale = self.renderScale or 1
+    if math.abs(scale - 1) < 0.001 then
+        return w, h
+    end
+
+    return w * scale, h * scale
+end
+
+function UI:ResetContentAnimation()
+    self.contentAlpha = 0
+    self.contentOffset = 6
+    self:MarkCurrentTabDirty()
+end
+
+function UI:UpdateAnimations(dt)
+    if not self:AreAnimationsEnabled() then
+        self.uiAlpha = self.uiVisible and 1 or 0
+        self.uiOffset = 0
+        self.renderX = self.window.x
+        self.renderY = self.window.y
+        self.renderScale = 1
+        self.contentAlpha = self.uiVisible and 1 or 0
+        self.contentOffset = 0
+        self.activeTabHighlightY = 110 + ((self.selectedTab - 1) * 32)
+
+        for tabIndex = 1, #self.tabs do
+            self.animationState.tabHover[tabIndex] = self.hoveredId == ("tab_" .. tostring(tabIndex)) and 1 or 0
+            self.animationState.tabActive[tabIndex] = self.selectedTab == tabIndex and 1 or 0
+        end
+
+        for _, tabControls in ipairs(self.controls or {}) do
+            for _, control in ipairs(tabControls) do
+                self.animationState.controlHover[control.id] = self.hoveredId == control.id and 1 or 0
+                self.animationState.dropdownOpen[control.id] = self.expandedDropdown == control.id and 1 or 0
+                self.animationState.sliderFill[control.id] = control.type == "slider" and self:GetSliderPercent(control) or self.animationState.sliderFill[control.id]
+                self.animationState.toggleFill[control.id] = control.type == "toggle" and (control.value and 1 or 0) or self.animationState.toggleFill[control.id]
+                self.animationState.checkboxFill[control.id] = control.type == "checkbox" and (control.value and 1 or 0) or self.animationState.checkboxFill[control.id]
+            end
+        end
+
+        local _, _, _, _, thumbTargetY = self:GetScrollbarMetrics()
+        self.animatedScrollThumbY = thumbTargetY
+        return
+    end
+
+    local animating = false
+    local alphaTarget = self.uiVisible and 1 or 0
+    self.uiAlpha = LerpNumber(self.uiAlpha or alphaTarget, alphaTarget, SmoothFactor(16, dt))
+    if math.abs(self.uiAlpha - alphaTarget) < 0.001 then
+        self.uiAlpha = alphaTarget
+    else
+        animating = true
+    end
+
+    local offsetTarget = self.uiVisible and 0 or 10
+    self.uiOffset = LerpNumber(self.uiOffset or offsetTarget, offsetTarget, SmoothFactor(16, dt))
+    if math.abs(self.uiOffset - offsetTarget) >= 0.01 then
+        animating = true
+    else
+        self.uiOffset = offsetTarget
+    end
+
+    self.renderX = self.window.x
+    self.renderY = self.window.y
+
+    local scaleTarget = self.uiVisible and 1 or 0.2
+    self.renderScale = LerpNumber(self.renderScale or scaleTarget, scaleTarget, SmoothFactor(16, dt))
+    if math.abs((self.renderScale or scaleTarget) - scaleTarget) >= 0.001 then
+        animating = true
+    else
+        self.renderScale = scaleTarget
+    end
+
+    local contentTarget = self.uiVisible and 1 or 0
+    self.contentAlpha = LerpNumber(self.contentAlpha or contentTarget, contentTarget, SmoothFactor(14, dt))
+    self.contentOffset = LerpNumber(self.contentOffset or 0, self.uiVisible and 0 or 4, SmoothFactor(14, dt))
+    if math.abs(self.contentAlpha - contentTarget) >= 0.001 or math.abs(self.contentOffset - (self.uiVisible and 0 or 4)) >= 0.01 then
+        animating = true
+    else
+        self.contentAlpha = contentTarget
+        self.contentOffset = self.uiVisible and 0 or 4
+    end
+
+    local activeTabTargetY = 110 + ((self.selectedTab - 1) * 32)
+    if self.draggingWindow then
+        self.activeTabHighlightY = activeTabTargetY
+    else
+        self.activeTabHighlightY = LerpNumber(self.activeTabHighlightY or activeTabTargetY, activeTabTargetY, SmoothFactor(18, dt))
+    end
+    if math.abs((self.activeTabHighlightY or activeTabTargetY) - activeTabTargetY) >= 0.01 then
+        animating = true
+    else
+        self.activeTabHighlightY = activeTabTargetY
+    end
+
+    for tabIndex = 1, #self.tabs do
+        local hoverTarget = self.hoveredId == ("tab_" .. tostring(tabIndex)) and 1 or 0
+        local _, hoverAnimating = self:AnimateValue(self.animationState.tabHover, tabIndex, hoverTarget, 18, dt, hoverTarget)
+        local activeTarget = self.selectedTab == tabIndex and 1 or 0
+        local _, activeAnimating = self:AnimateValue(self.animationState.tabActive, tabIndex, activeTarget, 18, dt, activeTarget)
+        if hoverAnimating or activeAnimating then
+            animating = true
+        end
+    end
+
+    for _, tabControls in ipairs(self.controls or {}) do
+        for _, control in ipairs(tabControls) do
+            local _, hoverAnimating = self:AnimateValue(
+                self.animationState.controlHover,
+                control.id,
+                self.hoveredId == control.id and 1 or 0,
+                18,
+                dt,
+                0
+            )
+            local _, dropdownAnimating = self:AnimateValue(
+                self.animationState.dropdownOpen,
+                control.id,
+                self.expandedDropdown == control.id and 1 or 0,
+                16,
+                dt,
+                0
+            )
+            if hoverAnimating or dropdownAnimating then
+                animating = true
+            end
+
+            if control.type == "slider" then
+                local _, sliderAnimating = self:AnimateValue(
+                    self.animationState.sliderFill,
+                    control.id,
+                    self:GetSliderPercent(control),
+                    20,
+                    dt,
+                    self:GetSliderPercent(control)
+                )
+                if sliderAnimating then
+                    animating = true
+                end
+            elseif control.type == "toggle" then
+                local _, toggleAnimating = self:AnimateValue(
+                    self.animationState.toggleFill,
+                    control.id,
+                    control.value and 1 or 0,
+                    20,
+                    dt,
+                    control.value and 1 or 0
+                )
+                if toggleAnimating then
+                    animating = true
+                end
+            elseif control.type == "checkbox" then
+                local _, checkboxAnimating = self:AnimateValue(
+                    self.animationState.checkboxFill,
+                    control.id,
+                    control.value and 1 or 0,
+                    20,
+                    dt,
+                    control.value and 1 or 0
+                )
+                if checkboxAnimating then
+                    animating = true
+                end
+            end
+        end
+    end
+
+    local _, _, _, _, thumbTargetY = self:GetScrollbarMetrics()
+    self.animatedScrollThumbY = LerpNumber(self.animatedScrollThumbY or thumbTargetY, thumbTargetY, SmoothFactor(18, dt))
+    if math.abs((self.animatedScrollThumbY or thumbTargetY) - thumbTargetY) >= 0.01 then
+        animating = true
+    else
+        self.animatedScrollThumbY = thumbTargetY
+    end
+
+    if animating then
+        self.needsRedraw = true
+    end
+end
+
+function UI:DrawCardFrame(bucket, x, y, w, h, outlineColor)
+    self:CreateSquare(bucket, x, y, w, h, Theme.card, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, outlineColor or Theme.border, 1, false, 1)
+    self:CreateLine(bucket, x + 1, y + 1, x + w - 2, y + 1, Theme.topHighlight, 0.42, 1)
+    self:CreateLine(bucket, x + 1, y + 2, x + w - 2, y + 2, Theme.cardInner, 0.2, 1)
 end
 
 function UI:RegisterHitbox(id, x, y, w, h, callback, priority)
@@ -412,8 +806,13 @@ function UI:EnsureConfigStorage()
 end
 
 function UI:IsAutoSaveConfigEnabled()
-    local control = self:GetControl(4, "auto_save_config")
+    local control = self:GetControl(5, "auto_save_config")
     return control and control.value == true
+end
+
+function UI:AreAnimationsEnabled()
+    local control = self:GetControl(5, "ui_animations")
+    return not control or control.value == true
 end
 
 function UI:BuildConfigData()
@@ -467,12 +866,12 @@ function UI:ApplyConfigData(data)
         end
     end
 
-    local widthControl = self:GetControl(4, "ui_scale")
+    local widthControl = self:GetControl(5, "ui_scale")
     if widthControl and widthControl.value then
         self.window.width = widthControl.value
     end
 
-    local accentControl = self:GetControl(4, "accent_theme")
+    local accentControl = self:GetControl(5, "accent_theme")
     if accentControl then
         self:ApplyAccentTheme(accentControl.value)
     end
@@ -599,8 +998,23 @@ function UI:GetLocalRootPart()
     return character:FindFirstChild("HumanoidRootPart")
 end
 
+function UI:GetPlayerFromRootPart(rootPart)
+    if not rootPart or not rootPart.Parent then
+        return nil
+    end
+
+    local character = rootPart.Parent
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character == character then
+            return player
+        end
+    end
+
+    return nil
+end
+
 function UI:GetTweenSpeed()
-    local control = self:GetControl(4, "tween_speed")
+    local control = self:GetControl(5, "tween_speed")
     local value = control and tonumber(control.value) or 60
     return math.clamp(value or 60, 60, 200)
 end
@@ -700,6 +1114,24 @@ function UI:GetNearestCreditTarget(origin)
     return nearest, nearestDistance
 end
 
+function UI:IsCoinFarmBusy()
+    if not self:IsToggleEnabled("farm_coins_toggle") then
+        return false
+    end
+
+    if self:IsValidCreditTarget(self.coinFarmTarget) then
+        return true
+    end
+
+    local root = self:GetLocalRootPart()
+    if not root then
+        return false
+    end
+
+    local nextTarget = self:GetNearestCreditTarget(root.Position)
+    return nextTarget ~= nil
+end
+
 function UI:HandleCoinFarm(deltaTime)
     if not self:IsToggleEnabled("farm_coins_toggle") then
         self.coinFarmTarget = nil
@@ -785,6 +1217,99 @@ function UI:HandleCoinFarm(deltaTime)
     pcall(function()
         root.Velocity = Vector3.new(0, 0, 0)
     end)
+end
+
+function UI:HandleAutoKillPlayers(deltaTime)
+    if not self:IsToggleEnabled("auto_kill_players_toggle") then
+        self.autoKillTarget = nil
+        return
+    end
+
+    if not self:IsPlayerInGame(LocalPlayer) then
+        self.autoKillTarget = nil
+        return
+    end
+
+    if not self:GetPlayerItState(LocalPlayer) then
+        self.autoKillTarget = nil
+        return
+    end
+
+    if self:IsCoinFarmBusy() then
+        self.autoKillTarget = nil
+        return
+    end
+
+    local root = self:GetLocalRootPart()
+    if not root then
+        self.autoKillTarget = nil
+        return
+    end
+
+    if self.autoKillTarget then
+        local targetPlayer = self:GetPlayerFromRootPart(self.autoKillTarget)
+
+        if not targetPlayer
+            or not self:IsPlayerInGame(targetPlayer)
+            or self:GetPlayerItState(targetPlayer)
+            or not self.autoKillTarget.Parent
+            or self.autoKillTarget == root
+        then
+            self.autoKillTarget = nil
+        end
+    end
+
+    if not self.autoKillTarget then
+        local nearest = nil
+        local nearestDist = math.huge
+        local origin = root.Position
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer
+                and self:IsPlayerInGame(player)
+                and not self:GetPlayerItState(player)
+            then
+                local char = player.Character
+                local playerRoot = char and char:FindFirstChild("HumanoidRootPart")
+                if playerRoot and playerRoot ~= root then
+                    local dist = (playerRoot.Position - origin).Magnitude
+                    if dist < nearestDist then
+                        nearest = playerRoot
+                        nearestDist = dist
+                    end
+                end
+            end
+        end
+
+        self.autoKillTarget = nearest
+        if not self.autoKillTarget then
+            return
+        end
+    end
+
+    local targetPos = self.autoKillTarget.Position
+    local offset = targetPos - root.Position
+    local distance = offset.Magnitude
+
+    if distance <= 3 then
+        self.autoKillTarget = nil
+        return
+    end
+
+    self:SetCharacterNoClip(true)
+    pcall(function() root.Velocity = Vector3.new(0, 0, 0) end)
+
+    local stepDistance = self:GetTweenSpeed() * math.max(0, tonumber(deltaTime) or 0)
+    if stepDistance <= 0 then
+        return
+    end
+
+    local nextPos = distance > stepDistance
+        and root.Position + (offset.Unit * stepDistance)
+        or targetPos
+
+    root.CFrame = CFrame.new(nextPos.X, nextPos.Y, nextPos.Z)
+    pcall(function() root.Velocity = Vector3.new(0, 0, 0) end)
 end
 
 function UI:HideESPEntry(entry)
@@ -1064,44 +1589,58 @@ function UI:GetFormattedDropdownValue(control)
 end
 
 function UI:DrawToggle(bucket, control, x, y, w, h)
-    local enabled = control.value == true
+    local fill = self.animationState.toggleFill[control.id] or (control.value and 1 or 0)
     local boxSize = h
-    local radius = math.max(2, math.floor(boxSize / 4))
+    local radius = math.max(3, math.floor(boxSize / 4))
 
-    if enabled then
-        self:CreateSquare(bucket, x + radius, y, boxSize - (radius * 2), boxSize, Theme.accent, 1, true)
-        self:CreateSquare(bucket, x, y + radius, boxSize, boxSize - (radius * 2), Theme.accent, 1, true)
-        self:CreateCircle(bucket, x + radius, y + radius, radius, Theme.accent, 1, true)
-        self:CreateCircle(bucket, x + boxSize - radius, y + radius, radius, Theme.accent, 1, true)
-        self:CreateCircle(bucket, x + radius, y + boxSize - radius, radius, Theme.accent, 1, true)
-        self:CreateCircle(bucket, x + boxSize - radius, y + boxSize - radius, radius, Theme.accent, 1, true)
+    if fill <= 0.01 then
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, LerpColor(Theme.panelAlt, Theme.accentSoft, fill), 1, true)
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, LerpColor(Theme.border, Theme.accent, fill), 1, false, 1)
     else
-        self:CreateSquare(bucket, x, y, boxSize, boxSize, Theme.panelAlt, 1, true)
-        self:CreateSquare(bucket, x, y, boxSize, boxSize, Theme.border, 1, false, 1)
+        local borderColor = LerpColor(Theme.border, Theme.accent, fill)
+        local fillColor = LerpColor(Theme.panelAlt, Theme.accent, fill)
+        self:CreateRoundedBox(bucket, x, y, boxSize, boxSize, radius, borderColor)
+        self:CreateRoundedBox(bucket, x + 1, y + 1, boxSize - 2, boxSize - 2, math.max(2, radius - 1), fillColor)
     end
 end
 
 function UI:DrawCheckbox(bucket, control, x, y, w, h)
-    self:CreateSquare(bucket, x, y, w, h, control.value and Theme.accent or Theme.panelAlt, 1, true)
-    self:CreateSquare(bucket, x, y, w, h, control.value and Theme.accent or Theme.border, 1, false, 1)
+    local fill = self.animationState.checkboxFill[control.id] or (control.value and 1 or 0)
+    self:CreateSquare(bucket, x, y, w, h, LerpColor(Theme.panelAlt, Theme.accentSoft, fill), 1, true)
+    self:CreateSquare(bucket, x, y, w, h, LerpColor(Theme.border, Theme.accent, fill), 1, false, 1)
+    if fill > 0.01 then
+        local inset = 4 + math.floor((1 - fill) * 2)
+        self:CreateSquare(bucket, x + inset, y + inset, math.max(2, w - (inset * 2)), math.max(2, h - (inset * 2)), Theme.accent, fill, true)
+    end
 end
 
 function UI:DrawButton(bucket, control, x, y, w, h)
-    local accent = Theme[control.accent or "accent"] or Theme.accent
     local activeFlash = control.flashUntil and tick() < control.flashUntil
-    self:CreateSquare(bucket, x, y, w, h, activeFlash and accent or Theme.panel, 1, true)
-    self:CreateSquare(bucket, x, y, w, h, accent, 1, false, 1)
-    self:CreateText(bucket, control.label, x + 10, y + 6, Theme.text, 12, false)
+    local pressOffset = activeFlash and 1 or 0
+    local fillColor = activeFlash and Theme.panelAlt or Theme.panel
+    local outlineColor = activeFlash and Theme.accentSoft or Theme.border
+
+    self:CreateSquare(bucket, x, y, w, h, fillColor, 1, true)
+    self:CreateSquare(bucket, x, y, w, h, outlineColor, 1, false, 1)
+    if activeFlash then
+        self:CreateLine(bucket, x + 1, y + h - 2, x + w - 2, y + h - 2, Theme.topHighlight, 0.28, 1)
+    else
+        self:CreateLine(bucket, x + 1, y + 1, x + w - 2, y + 1, Theme.topHighlight, 0.45, 1)
+    end
+    self:CreateText(bucket, control.label, x + math.floor(w / 2), y + 12 + pressOffset, Theme.text, 12, true)
 end
 
 function UI:DrawSlider(bucket, control, x, y, w, h)
-    self:CreateText(bucket, tostring(control.value), x + w + 12, y - 5, Theme.text, 12, false)
-    self:CreateSquare(bucket, x, y + 4, w, 8, Theme.panelAlt, 1, true)
-    self:CreateSquare(bucket, x, y + 4, w, 8, Theme.border, 1, false, 1)
+    self:CreateText(bucket, tostring(control.value), x + w + 8, y - 2, Theme.text, 12, false)
+    self:CreateSquare(bucket, x, y + 5, w, 8, Theme.panelAlt, 1, true)
+    self:CreateSquare(bucket, x, y + 6, w, 6, Theme.borderSoft, 1, false, 1)
 
-    local percent = self:GetSliderPercent(control)
-    local fillW = math.max(6, math.floor(w * percent))
-    self:CreateSquare(bucket, x, y + 4, fillW, 8, Theme.accent, 1, true)
+    local percent = self.animationState.sliderFill[control.id] or self:GetSliderPercent(control)
+    local fillW = math.max(8, math.floor(w * percent))
+    self:CreateSquare(bucket, x, y + 5, fillW, 8, Theme.accent, 1, true)
+    local handleX = x + math.floor(w * percent)
+    self:CreateSquare(bucket, handleX - 3, y + 3, 6, 12, Theme.text, 1, true)
+    self:CreateSquare(bucket, handleX - 3, y + 3, 6, 12, Theme.border, 1, false, 1)
 
     control._sliderX = x
     control._sliderW = w
@@ -1110,13 +1649,18 @@ end
 function UI:DrawDropdown(bucket, control, x, y, w, h)
     self:CreateSquare(bucket, x, y, w, h, Theme.panel, 1, true)
     self:CreateSquare(bucket, x, y, w, h, Theme.border, 1, false, 1)
-    self:CreateText(bucket, self:GetFormattedDropdownValue(control), x + 10, y + 6, Theme.text, 12, false)
-    self:CreateText(bucket, "v", x + w - 18, y + 6, Theme.text, 12, false)
+    self:CreateLine(bucket, x + 1, y + 1, x + w - 2, y + 1, Theme.topHighlight, 0.45, 1)
+    self:CreateLine(bucket, x + w - 30, y + 5, x + w - 30, y + h - 6, Theme.borderSoft, 0.65, 1)
+    self:CreateText(bucket, self:GetFormattedDropdownValue(control), x + 12, y + 7, Theme.text, 12, false)
+    self:CreateText(bucket, "v", x + w - 19, y + 7, Theme.text, 12, false)
 end
 
 function UI:HandleControlClick(control)
     if control.type == "toggle" or control.type == "checkbox" then
         control.value = not control.value
+        if control.id == "ui_animations" then
+            self.needsRedraw = true
+        end
         self:SaveConfig(control.id == "auto_save_config")
     elseif control.type == "button" then
         control.flashUntil = tick() + 0.35
@@ -1125,6 +1669,19 @@ function UI:HandleControlClick(control)
                 pcall(setclipboard, "https://discord.gg/Hu7BQwkJ3y")
             end
             self:NotifyPlayer("Discord link copied to clipboard", "Windy", 3)
+        elseif control.id == "teleport_to_spawn_button" then
+            local root = self:GetLocalRootPart()
+            local lobby = workspace and workspace:FindFirstChild("Lobby")
+            local basePlate = lobby and lobby:FindFirstChild("BasePlate")
+
+            if root and basePlate and basePlate.Position ~= nil then
+                local targetCFrame = CFrame.new(basePlate.Position.X, basePlate.Position.Y + 3, basePlate.Position.Z)
+                for _ = 1, 5 do
+                    root.CFrame = targetCFrame
+                end
+            else
+                self:NotifyPlayer("Lobby.BasePlate not found", "Windy", 3)
+            end
         end
     elseif control.type == "dropdown_single" or control.type == "dropdown_multi" then
         self:ToggleDropdown(control.id)
@@ -1166,6 +1723,10 @@ function UI:HandleHotkeys()
     local ok, pressed = pcall(iskeypressed, VK_Z)
     if ok and pressed then
         self.uiVisible = not self.uiVisible
+        if self.uiVisible then
+            self.contentAlpha = 0.85
+            self.contentOffset = 4
+        end
         self.lastToggleTick = now
         self.needsRedraw = true
     end
@@ -1242,41 +1803,72 @@ end
 function UI:BuildShell()
     local bucket = self.shellBucket
     self:ClearBucket(bucket)
+    bucket.deferVisible = true
+    self.renderAlpha = self.uiAlpha
 
-    local wx = self.window.x
-    local wy = self.window.y
+    local wx, wyBase = self:GetRenderWindowPosition()
+    local wy = wyBase + self:GetAnimatedWindowYOffset()
     local ww = self.window.width
     local wh = self.window.height
     local sidebarW = self.window.sidebarWidth
 
     self:CreateSquare(bucket, wx, wy, ww, wh, Theme.bg, 1, true)
-    self:CreateSquare(bucket, wx, wy, ww, wh, Theme.border, 1, false, 1)
-    self:CreateSquare(bucket, wx, wy, ww, 2, Theme.accent, 1, true)
-    self:CreateSquare(bucket, wx, wy, sidebarW, wh, Theme.sidebar, 1, true)
-    self:CreateLine(bucket, wx + sidebarW, wy + 2, wx + sidebarW, wy + wh - 2, Theme.border, 1, 1)
+    self:CreateSquare(bucket, wx, wy, ww, wh, Theme.accent, 1, false, 1)
+    self:CreateSquare(bucket, wx + 1, wy + 1, ww - 2, wh - 2, Theme.border, 1, false, 1)
+    self:CreateSquare(bucket, wx + 1, wy + 1, sidebarW - 1, wh - 2, Theme.sidebar, 1, true)
+    self:CreateLine(bucket, wx + sidebarW, wy + 2, wx + sidebarW, wy + wh - 2, Theme.borderSoft, 1, 1)
 
-    local iconX = wx + 14
-    local iconY = wy + 14
-    self:CreateSquare(bucket, iconX, iconY, 34, 34, Theme.accent, 1, true)
-    self:CreateText(bucket, "W", iconX + 10, iconY + 7, Theme.success, 16, false)
+    local iconX = wx + 16
+    local iconY = wy + 16
+    local logoImageData = self:GetLogoImageData()
+    local drewLogoImage = false
+    if logoImageData then
+        local imageObject = self:CreateImage(bucket, logoImageData, iconX - 3, iconY - 3, 41, 41, 1)
+        drewLogoImage = imageObject ~= nil
+    end
+
+    if not drewLogoImage then
+        self:CreateText(bucket, "W", iconX + 17, iconY + 8, Theme.success, 16, true)
+    end
     self:CreateText(bucket, "Windy", iconX + 44, iconY + 6, Theme.text, 17, false)
     self:CreateText(bucket, "HIDE AND SEEK", iconX + 44, iconY + 22, Theme.textDim, 14, false)
-    self:CreateText(bucket, "HOW TO USE", wx + 16, wy + 72, Theme.text, 13, false)
+    self:CreateText(bucket, "HOW TO USE", wx + 16, wy + 82, Theme.textDim, 12, false)
 
-    local tabY = wy + 98
+    local tabY = wy + 110
+    local highlightY = wy + math.floor((self.activeTabHighlightY or 110) + 0.5)
+    self:CreateSquare(bucket, wx + 14, highlightY, sidebarW - 28, 27, Theme.accent, 1, true)
+    self:CreateSquare(bucket, wx + 14, highlightY + 2, 2, 23, Theme.success, 0.18, true)
+    self:CreateLine(bucket, wx + 18, highlightY + 2, wx + sidebarW - 17, highlightY + 2, Theme.success, 0.1, 1)
+
     for tabIndex, tab in ipairs(self.tabs) do
-        local selected = self.selectedTab == tabIndex
-        local hovered = self.hoveredId == ("tab_" .. tostring(tabIndex))
-        local buttonY = tabY + ((tabIndex - 1) * 28)
-        self:CreateSquare(bucket, wx + 14, buttonY, sidebarW - 26, 24, selected and Theme.accent or Theme.sidebar, 1, true)
-        self:CreateSquare(bucket, wx + 14, buttonY, sidebarW - 26, 24, selected and Theme.accentSoft or (hovered and Theme.accentSoft or Theme.border), 1, false, 1)
-        self:CreateText(bucket, tab.name, wx + 24, buttonY + 5, selected and Theme.success or Theme.text, 13, false)
+        local selectedAmount = self.animationState.tabActive[tabIndex] or (self.selectedTab == tabIndex and 1 or 0)
+        local hoverAmount = self.animationState.tabHover[tabIndex] or 0
+        local buttonY = tabY + ((tabIndex - 1) * 32)
+        local buttonX = wx + 14
+        local buttonW = sidebarW - 28
+        local buttonH = 27
 
-        self:RegisterHitbox("tab_" .. tostring(tabIndex), wx + 14, buttonY, sidebarW - 26, 24, function()
+        self:CreateSquare(bucket, buttonX, buttonY, buttonW, buttonH, LerpColor(Theme.shell, Theme.panel, hoverAmount), 1 - (selectedAmount * 0.95), true)
+        if hoverAmount > 0.01 and selectedAmount < 0.99 then
+            self:CreateSquare(bucket, buttonX + 1, buttonY + 1, buttonW - 2, buttonH - 2, Theme.topHighlight, 0.04 * hoverAmount, true)
+        end
+
+        self:CreateText(
+            bucket,
+            tab.name,
+            wx + 24,
+            buttonY + 7,
+            LerpColor(LerpColor(Theme.textDim, Theme.text, hoverAmount), Theme.success, selectedAmount),
+            13,
+            false
+        )
+
+        self:RegisterHitbox("tab_" .. tostring(tabIndex), buttonX, buttonY, buttonW, buttonH, function()
             if self.selectedTab ~= tabIndex then
                 self.selectedTab = tabIndex
                 self.expandedDropdown = nil
                 self.scroll.offset = 0
+                self:ResetContentAnimation()
                 self:UpdateScrollLimit()
                 self:MarkShellDirty()
                 self:MarkCurrentTabDirty()
@@ -1284,7 +1876,7 @@ function UI:BuildShell()
         end, 1)
     end
 
-    self:CreateText(bucket, "Z = toggle", wx + ww - 70, wy + wh - 16, Theme.textDim, 12, false)
+    self:CreateText(bucket, "Z = toggle", wx + ww - 72, wy + wh - 16, Theme.textMuted, 12, false)
 
     self:RegisterHitbox("window_drag", wx, wy, ww, 18, function()
         self.draggingWindow = true
@@ -1293,6 +1885,102 @@ function UI:BuildShell()
         self.dragOffsetY = mousePos.Y - self.window.y
     end, 1)
 
+    bucket.deferVisible = false
+    bucket.built = true
+    self:ShowBucket(bucket)
+end
+
+function UI:BuildLoadingScreen()
+    local bucket = self.loadingBucket
+    self:ClearBucket(bucket)
+    bucket.deferVisible = true
+    self.renderAlpha = 1
+
+    local loadingScale = 0.4
+    local loadW = math.floor(self.window.width * loadingScale)
+    local loadH = math.floor(self.window.height * loadingScale)
+    local viewport = self:GetViewportSize()
+    local loadX = math.floor((viewport.X - loadW) * 0.5)
+    local loadY = math.floor((viewport.Y - loadH) * 0.5)
+
+    self.renderScale = self.bootPanelScale or 0.4
+
+    self:CreateSquare(bucket, loadX, loadY, loadW, loadH, Theme.bg, 1, true)
+    self:CreateSquare(bucket, loadX, loadY, loadW, loadH, Theme.accent, 1, false, 1)
+    self:CreateSquare(bucket, loadX + 1, loadY + 1, loadW - 2, loadH - 2, Theme.border, 1, false, 1)
+    self:CreateSquare(bucket, loadX, loadY, loadW, 2, Theme.accent, 1, true)
+
+    local iconSize = 52
+    local iconX = loadX + math.floor((loadW - iconSize) * 0.5)
+    local iconY = loadY + 18
+    local logoImageData = self:GetLogoImageData()
+    local drewLogoImage = false
+
+    if logoImageData then
+        local imageObject = self:CreateImage(bucket, logoImageData, iconX, iconY, iconSize, iconSize, 1)
+        drewLogoImage = imageObject ~= nil
+    end
+
+    if not drewLogoImage then
+        self:CreateText(bucket, "W", iconX + math.floor(iconSize * 0.5), iconY + 12, Theme.success, 24, true)
+    end
+
+    self:CreateText(
+        bucket,
+        self.bootReady and "Ready" or "Loading...",
+        loadX + math.floor(loadW * 0.5),
+        loadY + 92,
+        self.bootReady and Theme.text or Theme.textDim,
+        13,
+        true
+    )
+
+    local progress = math.clamp(self.bootVisualProgress or 0, 0, 1)
+    local barW = math.max(80, loadW - 40)
+    local barX = loadX + math.floor((loadW - barW) * 0.5)
+    local barY = loadY + loadH - 22
+    self:CreateSquare(bucket, barX, barY, barW, 8, Theme.panelAlt, 1, true)
+    self:CreateSquare(bucket, barX, barY, barW, 8, Theme.borderSoft, 1, false, 1)
+    self:CreateSquare(bucket, barX, barY, math.max(8, math.floor(barW * progress)), 8, Theme.accent, 1, true)
+
+    if self.bootReady then
+        local buttonW = 78
+        local buttonH = 24
+        local buttonX = loadX + math.floor((loadW - buttonW) * 0.5)
+        local buttonY = barY - 34
+        local buttonHovered = self.hoveredId == "loading_load_button"
+
+        self:CreateSquare(bucket, buttonX, buttonY, buttonW, buttonH, buttonHovered and Theme.panelAlt or Theme.panel, 1, true)
+        self:CreateSquare(bucket, buttonX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
+        self:CreateLine(bucket, buttonX + 1, buttonY + 1, buttonX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.45, 1)
+        self:CreateText(bucket, "Load", buttonX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
+
+        self:RegisterHitbox("loading_load_button", buttonX, buttonY, buttonW, buttonH, function()
+            self.isBooting = false
+            self.bootReady = false
+            if self:AreAnimationsEnabled() then
+                self.uiAlpha = 0
+                self.renderScale = 0.82
+                self.contentAlpha = 0
+                self.contentOffset = 4
+            else
+                self.uiAlpha = 1
+                self.renderScale = 1
+                self.contentAlpha = 1
+                self.contentOffset = 0
+            end
+            self.needsRedraw = true
+        end, 3)
+    end
+
+    self:RegisterHitbox("window_drag", loadX, loadY, loadW, 18, function()
+        self.draggingWindow = true
+        local mousePos = self:GetMouseLocation()
+        self.dragOffsetX = mousePos.X - loadX
+        self.dragOffsetY = mousePos.Y - loadY
+    end, 1)
+
+    bucket.deferVisible = false
     bucket.built = true
     self:ShowBucket(bucket)
 end
@@ -1300,75 +1988,89 @@ end
 function UI:BuildActiveTab()
     local bucket = self.tabBuckets[self.selectedTab]
     self:ClearBucket(bucket)
+    bucket.deferVisible = true
+    self.renderAlpha = self.uiAlpha * self.contentAlpha
 
     local x, y, width, height = self:GetContentBounds()
     local cardX = x + 12
     local cardW = width - 28
-    local drawY = y + 10 - self.scroll.offset
+    local drawY = y + 10 + math.floor((self.contentOffset or 0) + 0.5) - self.scroll.offset
     local bottomY = y + height
 
     for _, control in ipairs(self:GetActiveControls()) do
-        local expanded = self.expandedDropdown == control.id
-        local extraHeight = expanded and ((#control.options or {}) * 26) + 8 or 0
-        local cardH = ((control.type == "slider") and 46 or 34) + extraHeight
+        local dropdownProgress = self.animationState.dropdownOpen[control.id] or ((self.expandedDropdown == control.id) and 1 or 0)
+        local expanded = dropdownProgress > 0.01
+        local optionCount = control.options and #control.options or 0
+        local extraHeight = math.floor((((optionCount) * 30) + 8) * dropdownProgress)
+        local cardH = ((control.type == "slider") and 56 or 44) + extraHeight
         local baseCardHeight = cardH - extraHeight
 
-        if drawY + baseCardHeight >= y and drawY <= bottomY then
+        local shouldDrawCard = drawY >= y and (drawY + baseCardHeight) <= bottomY
+
+        if shouldDrawCard then
             if control.type == "stat" then
-                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.card, 1, true)
-                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.border, 1, false, 1)
-                self:CreateText(bucket, control.label, cardX + 10, drawY + 9, Theme.text, 13, false)
-                self:CreateText(bucket, tostring(control.value or "-"), cardX + cardW - 150, drawY + 9, Theme.textDim, 13, false)
+                self:DrawCardFrame(bucket, cardX, drawY, cardW, baseCardHeight, Theme.border)
+                self:CreateText(bucket, control.label, cardX + 16, drawY + 16, Theme.textMuted, 13, false)
+                self:CreateRightText(bucket, tostring(control.value or "-"), cardX + cardW - 18, drawY + 16, Theme.text, 13)
             else
-                local hovered = self.hoveredId == control.id
-                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, Theme.card, 1, true)
-                self:CreateSquare(bucket, cardX, drawY, cardW, baseCardHeight, hovered and Theme.accentSoft or Theme.border, 1, false, 1)
-                self:CreateText(bucket, control.label, cardX + 10, drawY + 10, Theme.text, 13, false)
+                local hovered = self.animationState.controlHover[control.id] or 0
+                self:DrawCardFrame(bucket, cardX, drawY, cardW, baseCardHeight, LerpColor(Theme.border, Theme.topHighlight, hovered))
+                self:CreateText(bucket, control.label, cardX + 16, drawY + 16, Theme.text, 13, false)
 
                 if control.type == "toggle" then
-                    self:DrawToggle(bucket, control, cardX + cardW - 44, drawY + 7, 24, 16)
+                    self:DrawToggle(bucket, control, cardX + cardW - 32, drawY + 14, 16, 16)
                 elseif control.type == "checkbox" then
-                    self:DrawCheckbox(bucket, control, cardX + cardW - 28, drawY + 7, 16, 16)
+                    self:DrawCheckbox(bucket, control, cardX + cardW - 32, drawY + 14, 16, 16)
                 elseif control.type == "button" then
-                    self:DrawButton(bucket, control, cardX + cardW - 122, drawY + 5, 110, 24)
+                    self:DrawButton(bucket, control, cardX + cardW - 128, drawY + 10, 114, 24)
                 elseif control.type == "slider" then
-                    self:DrawSlider(bucket, control, cardX + 10, drawY + 26, cardW - 70, 18)
+                    self:DrawSlider(bucket, control, cardX + 16, drawY + 32, cardW - 86, 18)
                 else
-                    self:DrawDropdown(bucket, control, cardX + 154, drawY + 5, cardW - 166, 24)
+                    self:DrawDropdown(bucket, control, cardX + 176, drawY + 10, cardW - 192, 24)
                 end
 
                 if control.type == "slider" then
-                    self:RegisterHitbox(control.id, cardX + 10, drawY + 20, cardW - 50, 20, function()
+                    self:RegisterHitbox(control.id, cardX + 16, drawY + 26, cardW - 62, 24, function()
                         self.draggingSlider = true
                         self.activeSlider = control
                         self:SetSliderFromMouse(control, self:GetMouseLocation().X)
                     end, 2)
                 else
-                    self:RegisterHitbox(control.id, cardX, drawY, cardW, 34, function()
+                    self:RegisterHitbox(control.id, cardX, drawY, cardW, baseCardHeight, function()
                         self:HandleControlClick(control)
                     end, 1)
                 end
 
                 if expanded then
-                    local listY = drawY + 34
-                    local listH = #control.options * 26
-                    self:CreateSquare(bucket, cardX, listY, cardW, listH + 4, Theme.shell, 1, true)
-                    self:CreateSquare(bucket, cardX, listY, cardW, listH + 4, Theme.border, 1, false, 1)
+                    local listY = drawY + baseCardHeight
+                    local listH = math.max(0, extraHeight - 2)
+                    self:CreateSquare(bucket, cardX, listY, cardW, listH, Theme.shell, 1, true)
+                    self:CreateSquare(bucket, cardX, listY, cardW, listH, Theme.border, dropdownProgress, false, 1)
+                    self:CreateLine(bucket, cardX + 1, listY + 1, cardX + cardW - 2, listY + 1, Theme.topHighlight, 0.35 * dropdownProgress, 1)
 
                     for optionIndex, option in ipairs(control.options) do
-                        local rowY = listY + ((optionIndex - 1) * 26)
+                        local rowY = listY + 4 + ((optionIndex - 1) * 30)
                         local selected = control.type == "dropdown_single"
                             and control.value == option
                             or (control.selected and control.selected[option] == true)
+                        local optionHoverId = control.id .. "_opt_" .. optionIndex
+                        local optionHovered = self.hoveredId == optionHoverId
 
-                        self:CreateSquare(bucket, cardX, rowY, cardW, 24, selected and Theme.accentSoft or Theme.panel, 1, true)
-                        self:CreateSquare(bucket, cardX, rowY, cardW, 24, selected and Theme.accent or Theme.border, 1, false, 1)
-                        self:CreateText(bucket, option, cardX + 10, rowY + 5, Theme.text, 12, false)
-                        self:CreateText(bucket, selected and "x" or "", cardX + cardW - 18, rowY + 4, Theme.text, 12, false)
+                        if rowY + 26 <= listY + listH + 2 then
+                            self:CreateSquare(bucket, cardX + 4, rowY, cardW - 8, 26, selected and Theme.accentSoft or (optionHovered and Theme.panelAlt or Theme.panel), dropdownProgress, true)
+                            self:CreateSquare(bucket, cardX + 4, rowY, cardW - 8, 26, selected and Theme.accent or (optionHovered and Theme.topHighlight or Theme.borderSoft), dropdownProgress, false, 1)
+                            local previousAlpha = self.renderAlpha
+                            self.renderAlpha = previousAlpha * dropdownProgress
+                            self:CreateText(bucket, option, cardX + 14, rowY + 6, Theme.text, 12, false)
+                            self.renderAlpha = previousAlpha
+                            if selected then
+                                self:CreateSquare(bucket, cardX + cardW - 24, rowY + 8, 8, 8, Theme.accent, dropdownProgress, true)
+                            end
 
-                        self:RegisterHitbox(control.id .. "_opt_" .. optionIndex, cardX, rowY, cardW, 24, function()
-                            self:HandleDropdownOption(control, option)
-                        end, 2)
+                            self:RegisterHitbox(optionHoverId, cardX + 4, rowY, cardW - 8, 26, function()
+                                self:HandleDropdownOption(control, option)
+                            end, 2)
+                        end
                     end
                 end
             end
@@ -1379,18 +2081,20 @@ function UI:BuildActiveTab()
 
     local scrollbarX, scrollbarY, scrollbarW, scrollbarH, thumbY, thumbH = self:GetScrollbarMetrics()
     self:CreateSquare(bucket, scrollbarX, scrollbarY, scrollbarW, scrollbarH, Theme.shell, 1, true)
-    self:CreateSquare(bucket, scrollbarX, scrollbarY, scrollbarW, scrollbarH, Theme.border, 1, false, 1)
+    self:CreateSquare(bucket, scrollbarX, scrollbarY, scrollbarW, scrollbarH, Theme.borderSoft, 1, false, 1)
 
     if self.scroll.max <= 0 then
         self:CreateSquare(bucket, scrollbarX + 1, scrollbarY + 1, scrollbarW - 2, scrollbarH - 2, Theme.panelAlt, 1, true)
     else
-        self:CreateSquare(bucket, scrollbarX + 1, thumbY, scrollbarW - 2, thumbH, Theme.accent, 1, true)
-        self:RegisterHitbox("scrollbar_thumb", scrollbarX - 10, thumbY - 2, scrollbarW + 20, thumbH + 4, function()
+        local animatedThumbY = math.floor((self.animatedScrollThumbY or thumbY) + 0.5)
+        self:CreateSquare(bucket, scrollbarX + 1, animatedThumbY, scrollbarW - 2, thumbH, Theme.accent, 1, true)
+        self:RegisterHitbox("scrollbar_thumb", scrollbarX - 10, animatedThumbY - 2, scrollbarW + 20, thumbH + 4, function()
             self.draggingScroll = true
-            self.scrollDragOffset = self:GetMouseLocation().Y - thumbY
+            self.scrollDragOffset = self:GetMouseLocation().Y - animatedThumbY
         end, 3)
     end
 
+    bucket.deferVisible = false
     bucket.built = true
     self:ShowBucket(bucket)
 end
@@ -1398,8 +2102,21 @@ end
 function UI:Render()
     self.hitboxes = {}
 
-    if not self.uiVisible then
+    if self.isBooting then
         self:HideBucket(self.shellBucket)
+        for _, bucket in ipairs(self.tabBuckets) do
+            self:HideBucket(bucket)
+        end
+        self:BuildLoadingScreen()
+        self.needsRedraw = false
+        return
+    end
+
+    self:HideBucket(self.loadingBucket)
+
+    if (not self.uiVisible) and (self.uiAlpha or 0) <= 0.01 then
+        self:HideBucket(self.shellBucket)
+        self:HideBucket(self.loadingBucket)
         for _, bucket in ipairs(self.tabBuckets) do
             self:HideBucket(bucket)
         end
@@ -1431,6 +2148,10 @@ pcall(function()
     end
 end)
 
+pcall(function()
+    UI:GetLogoImageData()
+end)
+
 UI:RefreshHomeStats(true)
 UI:Render()
 
@@ -1438,6 +2159,59 @@ RunService.RenderStepped:Connect(function(deltaTime)
     if not UI.isRunning then
         return
     end
+
+    if UI.isBooting then
+        local oldProgress = UI.bootVisualProgress or 0
+        local oldTarget = UI.bootVisualTarget or 0
+        local oldReady = UI.bootReady == true
+        local oldPanelScale = UI.bootPanelScale or 0.4
+
+        pcall(function()
+            UI:GetLogoImageData()
+        end)
+
+        local elapsed = tick() - UI.bootStartedAt
+        local duration = math.max(0.01, UI.bootDuration)
+        local timeProgress = math.clamp(elapsed / duration, 0, 1)
+        local minProgress = math.min(0.985, timeProgress * 0.9)
+        UI.bootPanelScale = LerpNumber(UI.bootPanelScale or 0.4, 1, SmoothFactor(10, deltaTime or (1 / 60)))
+        if math.abs((UI.bootPanelScale or 1) - 1) < 0.001 then
+            UI.bootPanelScale = 1
+        end
+
+        if (UI.bootVisualTarget or 0) <= (UI.bootVisualProgress or 0) + 0.01 then
+            local remaining = math.max(minProgress + 0.02, 0.98 - (math.random() * 0.06))
+            UI.bootVisualTarget = math.clamp((UI.bootVisualProgress or 0) + (0.03 + (math.random() * 0.14)), 0.08, remaining)
+        end
+
+        UI.bootVisualProgress = math.max(
+            minProgress,
+            LerpNumber(UI.bootVisualProgress or 0, UI.bootVisualTarget or minProgress, SmoothFactor(2.2 + (math.random() * 0.8), deltaTime or (1 / 60)))
+        )
+
+        if timeProgress >= 1 then
+            UI.bootVisualProgress = 1
+        end
+
+        if (tick() - UI.bootStartedAt) >= UI.bootDuration
+            and (UI.bootVisualProgress or 0) >= 0.999
+            and UI:IsLogoImageReady()
+        then
+            UI.bootReady = true
+        end
+
+        if math.abs((UI.bootVisualProgress or 0) - oldProgress) >= 0.002
+            or math.abs((UI.bootVisualTarget or 0) - oldTarget) >= 0.01
+            or math.abs((UI.bootPanelScale or 0.4) - oldPanelScale) >= 0.002
+            or (UI.bootReady == true) ~= oldReady
+        then
+            UI.needsRedraw = true
+        end
+    end
+
+    pcall(function()
+        UI:UpdateAnimations(deltaTime or (1 / 60))
+    end)
 
     pcall(function()
         UI:HandleHotkeys()
@@ -1452,14 +2226,18 @@ RunService.RenderStepped:Connect(function(deltaTime)
     end)
 
     pcall(function()
-        UI:RefreshCoinESP()
-    end)
-
-    pcall(function()
         UI:HandleCoinFarm(deltaTime)
     end)
 
-    if UI.uiVisible then
+    pcall(function()
+        UI:HandleAutoKillPlayers(deltaTime)
+    end)
+
+    if UI.isBooting then
+        pcall(function()
+            UI:HandleInput()
+        end)
+    elseif UI.uiVisible and (UI.uiAlpha or 0) > 0.9 and (UI.renderScale or 1) > 0.98 then
         pcall(function()
             UI:HandleInput()
         end)
