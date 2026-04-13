@@ -112,6 +112,7 @@ local UI = {
     logoImageData = nil,
     logoImageFailed = false,
     logoImageUnsupported = false,
+    autoDoThread = nil,
     animationState = {
         tabHover = {},
         tabActive = {},
@@ -180,6 +181,7 @@ local UI = {
             {id = "pc_esp", type = "toggle", label = "PC ESP", description = "", value = false},
         },
         {
+            {id = "auto_do_toggle", type = "toggle", label = "Auto Pc Puzzle", description = "", value = false},
             {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", description = "", accent = "accent"},
         },
         {
@@ -536,21 +538,18 @@ end
 
 function UI:GetCurrentFtfMapRoot(force)
     local now = tick()
-    local warmupActive = (now - (self.computerCacheWarmupStartedAt or 0)) < 60
-    local mapCheckInterval = 10
-
-    if warmupActive and not self.currentMapRoot then
-        mapCheckInterval = 5
+    if self.currentMapRoot and self.currentMapRoot.Parent == workspace and not force then
+        return self.currentMapRoot
     end
 
-    if not force and (now - (self.lastComputerMapCheck or 0)) < mapCheckInterval then
+    if not force and (now - (self.lastComputerMapCheck or 0)) < 10 then
         return self.currentMapRoot
     end
 
     self.lastComputerMapCheck = now
 
     for _, obj in ipairs(workspace:GetChildren()) do
-        if obj and obj:IsA("Model") and obj:FindFirstChild("ComputerTable", true) then
+        if obj and obj:IsA("Model") and obj:FindFirstChild("ComputerTable") then
             self.currentMapRoot = obj
             return obj
         end
@@ -561,8 +560,6 @@ function UI:GetCurrentFtfMapRoot(force)
 end
 
 function UI:RefreshComputerCache(force)
-    local now = tick()
-    local warmupActive = (now - (self.computerCacheWarmupStartedAt or 0)) < 60
     local mapRoot = self:GetCurrentFtfMapRoot(force)
 
     if not mapRoot then
@@ -571,17 +568,7 @@ function UI:RefreshComputerCache(force)
         return self.computerCache
     end
 
-    if not force and self.computerCacheMap == mapRoot then
-        if warmupActive and (now - (self.lastComputerCacheRefresh or 0)) < 5 then
-            return self.computerCache or {}
-        end
-
-        if (not warmupActive) and self.computerCache and #self.computerCache > 0 then
-            return self.computerCache
-        end
-    end
-
-    if not force and not warmupActive and self.computerCacheMap == mapRoot and self.computerCache and #self.computerCache > 0 then
+    if not force and self.computerCacheMap == mapRoot and self.computerCache then
         return self.computerCache
     end
 
@@ -600,7 +587,7 @@ function UI:RefreshComputerCache(force)
 
     self.computerCache = results
     self.computerCacheMap = mapRoot
-    self.lastComputerCacheRefresh = now
+    self.lastComputerCacheRefresh = tick()
     return results
 end
 
@@ -642,6 +629,60 @@ function UI:ExecuteForceUnfreezeAction()
     memory_write("int", game.Players.LocalPlayer.Character.Humanoid.Address + 0x194, 0)
     warn("Cant Interact With Anything Till Game Is Over")
     self:NotifyPlayer("Cant Interact With Anything Till Game Is Over", "Windy", 4)
+end
+
+
+
+function UI:StartAutoDo()
+    self:StopAutoDo()
+    local eKey = 0x45
+    local tolerance = 10.5
+
+    self.autoDoThread = task.spawn(function()
+        local hasPressed = false
+        while true do
+            local control = self:GetControl(3, "auto_do_toggle")
+            if control and control.value then
+                local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+                local screenGui = playerGui and playerGui:FindFirstChild("ScreenGui")
+                local timingCircle = screenGui and screenGui:FindFirstChild("TimingCircle")
+                local timingPin = timingCircle and timingCircle:FindFirstChild("TimingPin")
+                local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
+
+                if timingCircle and timingPin and timingBase then
+                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
+                    if ok and circleVisible == 1 then
+                        local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
+                        local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
+                        if pinOk and baseOk then
+                            local diff = math.abs(pinRotation - baseRotation)
+                            if diff > 180 then diff = 360 - diff end
+                            if diff <= tolerance and not hasPressed then
+                                task.wait(0.08)
+                                keypress(eKey)
+                                task.wait(0.05)
+                                keyrelease(eKey)
+                                hasPressed = true
+                            end
+                        end
+                    else
+                        hasPressed = false
+                    end
+                end
+                task.wait(0.1)
+            else
+                hasPressed = false
+                task.wait(0.1)
+            end
+        end
+    end)
+end
+
+function UI:StopAutoDo()
+    if self.autoDoThread then
+        task.cancel(self.autoDoThread)
+        self.autoDoThread = nil
+    end
 end
 
 function UI:UpdateNpcEsp()
@@ -1561,6 +1602,11 @@ end
 function UI:HandleControlClick(control)
     if control.type == "toggle" or control.type == "checkbox" then
         control.value = not control.value
+        if control.id == "auto_do_toggle" then
+            if control.value then
+                self:StartAutoDo()
+            end
+        end
         if control.id == "no_cooldown_runner" then
             self:NotifyPlayer(control.value and "No Cooldown enabled - hold Q to activate" or "No Cooldown disabled", "Windy", 3)
         end
@@ -2104,6 +2150,9 @@ pcall(function()
 end)
 
 UI:RefreshHomeStats(true)
+if UI:GetControl(3, "auto_do_toggle") and UI:GetControl(3, "auto_do_toggle").value then
+    UI:StartAutoDo()
+end
 UI:Render()
 
 RunService.RenderStepped:Connect(function(dt)
