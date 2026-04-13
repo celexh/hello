@@ -614,10 +614,11 @@ function UI:GetComputerTableAncestor(instance)
     return nil
 end
 
-function UI:ShowConfirmPopup(title, onYes)
+function UI:ShowConfirmPopup(title, onYes, okOnly)
     self.confirmPopup = {
         title = tostring(title or "Are you sure?"),
         onYes = onYes,
+        okOnly = okOnly == true,
     }
     self:MarkShellDirty()
 end
@@ -635,6 +636,11 @@ end
 
 function UI:ExecuteEndRoundAction()
     memory_write("int", game.Players.LocalPlayer.Character.Humanoid.Address + 0x194, 0)
+end
+
+function UI:IsLocalPlayerBeastNow()
+    local character = LocalPlayer and LocalPlayer.Character
+    return character and self:IsBeastModel(character) or false
 end
 
 
@@ -1632,9 +1638,13 @@ function UI:HandleControlClick(control)
                 self:ExecuteForceUnfreezeAction()
             end)
         elseif control.id == "end_round_button" then
-            self:ShowConfirmPopup("Only Ends Round If Youre Beast", function()
-                self:ExecuteEndRoundAction()
-            end)
+            if self:IsLocalPlayerBeastNow() then
+                self:ShowConfirmPopup("Only Ends Round If Youre Beast", function()
+                    self:ExecuteEndRoundAction()
+                end)
+            else
+                self:ShowConfirmPopup("You Must Be Beast", nil, true)
+            end
         end
     elseif control.type == "dropdown_single" or control.type == "dropdown_multi" then
         self:ToggleDropdown(control.id)
@@ -1870,9 +1880,11 @@ function UI:BuildConfirmOverlay()
     local popupY = wy + math.floor((wh - popupH) * 0.5)
     local buttonW = 82
     local buttonH = 24
+    local buttonY = popupY + popupH - buttonH - 18
     local noX = popupX + 24
     local yesX = popupX + popupW - buttonW - 24
-    local buttonY = popupY + popupH - buttonH - 18
+    local okOnly = self.confirmPopup.okOnly == true
+    local okX = popupX + math.floor((popupW - buttonW) * 0.5)
 
     self:CreateSquare(bucket, overlayX, overlayY, overlayW, overlayH, Color3.fromRGB(0, 0, 0), 0.45, true)
     self:CreateSquare(bucket, popupX, popupY, popupW, popupH, Theme.panel, 1, true)
@@ -1881,28 +1893,41 @@ function UI:BuildConfirmOverlay()
     self:CreateLine(bucket, popupX + 1, popupY + 1, popupX + popupW - 2, popupY + 1, Theme.topHighlight, 0.45, 1)
     self:CreateText(bucket, self.confirmPopup.title, popupX + math.floor(popupW * 0.5), popupY + 34, Theme.text, 14, true)
 
-    self:CreateSquare(bucket, noX, buttonY, buttonW, buttonH, Theme.panelAlt, 1, true)
-    self:CreateSquare(bucket, noX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
-    self:CreateLine(bucket, noX + 1, buttonY + 1, noX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.35, 1)
-    self:CreateText(bucket, "No", noX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
+    if okOnly then
+        self:CreateSquare(bucket, okX, buttonY, buttonW, buttonH, Theme.panelAlt, 1, true)
+        self:CreateSquare(bucket, okX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
+        self:CreateLine(bucket, okX + 1, buttonY + 1, okX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.35, 1)
+        self:CreateText(bucket, "OK", okX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
+    else
+        self:CreateSquare(bucket, noX, buttonY, buttonW, buttonH, Theme.panelAlt, 1, true)
+        self:CreateSquare(bucket, noX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
+        self:CreateLine(bucket, noX + 1, buttonY + 1, noX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.35, 1)
+        self:CreateText(bucket, "No", noX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
 
-    self:CreateSquare(bucket, yesX, buttonY, buttonW, buttonH, Theme.panelAlt, 1, true)
-    self:CreateSquare(bucket, yesX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
-    self:CreateLine(bucket, yesX + 1, buttonY + 1, yesX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.35, 1)
-    self:CreateText(bucket, "Yes", yesX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
+        self:CreateSquare(bucket, yesX, buttonY, buttonW, buttonH, Theme.panelAlt, 1, true)
+        self:CreateSquare(bucket, yesX, buttonY, buttonW, buttonH, Theme.border, 1, false, 1)
+        self:CreateLine(bucket, yesX + 1, buttonY + 1, yesX + buttonW - 2, buttonY + 1, Theme.topHighlight, 0.35, 1)
+        self:CreateText(bucket, "Yes", yesX + math.floor(buttonW * 0.5), buttonY + 12, Theme.text, 12, true)
+    end
 
     self:RegisterHitbox("confirm_popup_block", overlayX, overlayY, overlayW, overlayH, function()
     end, 100)
-    self:RegisterHitbox("confirm_popup_no", noX, buttonY, buttonW, buttonH, function()
-        self:CloseConfirmPopup()
-    end, 101)
-    self:RegisterHitbox("confirm_popup_yes", yesX, buttonY, buttonW, buttonH, function()
-        local callback = self.confirmPopup and self.confirmPopup.onYes or nil
-        self:CloseConfirmPopup()
-        if type(callback) == "function" then
-            callback()
-        end
-    end, 101)
+    if okOnly then
+        self:RegisterHitbox("confirm_popup_ok", okX, buttonY, buttonW, buttonH, function()
+            self:CloseConfirmPopup()
+        end, 101)
+    else
+        self:RegisterHitbox("confirm_popup_no", noX, buttonY, buttonW, buttonH, function()
+            self:CloseConfirmPopup()
+        end, 101)
+        self:RegisterHitbox("confirm_popup_yes", yesX, buttonY, buttonW, buttonH, function()
+            local callback = self.confirmPopup and self.confirmPopup.onYes or nil
+            self:CloseConfirmPopup()
+            if type(callback) == "function" then
+                callback()
+            end
+        end, 101)
+    end
 
     bucket.built = true
     bucket.deferVisible = false
