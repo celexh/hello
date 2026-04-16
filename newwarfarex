@@ -701,36 +701,18 @@ function UI:GetNeoSpecificationsContainer(target)
 end
 
 function UI:GetNeoManeuverabilityValueObject(target)
-    local container = self:GetNeoSpecificationsContainer(target)
-    if not container then
+    if not target then
         return nil
     end
 
-    local exactNames = {
-        "ManuveurabilityIndex",
-        "ManeuverabilityIndex",
-        "ManuverabilityIndex",
-        "ManiuverabilityIndex",
-    }
-
-    for _, name in ipairs(exactNames) do
-        local direct = container:FindFirstChild(name, true)
-        if direct and self:GetNeoNumericValue(direct) ~= nil then
-            return direct
-        end
-    end
-
-    local ok, descendants = pcall(function()
-        return container:GetDescendants()
-    end)
-    if not ok or not descendants then
+    local specifications = target:FindFirstChild("Specifications")
+    if not specifications then
         return nil
     end
 
-    for _, child in ipairs(descendants) do
-        if self:GetNeoNumericValue(child) ~= nil and string.find(string.lower(tostring(child.Name)), "index") then
-            return child
-        end
+    local exact = specifications:FindFirstChild("ManuveurabilityIndex")
+    if exact and self:GetNeoNumericValue(exact) ~= nil then
+        return exact
     end
 
     return nil
