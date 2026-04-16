@@ -706,12 +706,19 @@ function UI:GetNeoManeuverabilityValueObject(target)
         return nil
     end
 
-    local function normalize(text)
-        return string.lower((tostring(text or ""):gsub("[^%w]", "")))
-    end
+    local exactNames = {
+        "ManuveurabilityIndex",
+        "ManeuverabilityIndex",
+        "ManuverabilityIndex",
+        "ManiuverabilityIndex",
+    }
 
-    local bestMatch = nil
-    local bestScore = -1
+    for _, name in ipairs(exactNames) do
+        local direct = container:FindFirstChild(name, true)
+        if direct and self:GetNeoNumericValue(direct) ~= nil then
+            return direct
+        end
+    end
 
     local ok, descendants = pcall(function()
         return container:GetDescendants()
@@ -721,46 +728,9 @@ function UI:GetNeoManeuverabilityValueObject(target)
     end
 
     for _, child in ipairs(descendants) do
-        local numericValue = self:GetNeoNumericValue(child)
-        if numericValue ~= nil then
-            local normalized = normalize(child.Name)
-            local score = -1
-
-            if normalized == "maneuverabilityindex" then
-                score = 10
-            elseif normalized == "manuverabilityindex" then
-                score = 9
-            elseif normalized == "maniuverabilityindex" or normalized == "maniuveraiblityindex" then
-                score = 8
-            elseif string.find(normalized, "index") then
-                if string.find(normalized, "maneuver") then
-                    score = 7
-                elseif string.find(normalized, "manuver") then
-                    score = 6
-                elseif string.find(normalized, "maniuver") then
-                    score = 5
-                elseif string.find(normalized, "uver") or string.find(normalized, "maneu") or string.find(normalized, "manu") then
-                    score = 4
-                end
-            elseif numericValue >= 1 and numericValue <= 4 then
-                if string.find(normalized, "maneuver") or string.find(normalized, "manuver") or string.find(normalized, "maniuver") then
-                    score = 3
-                elseif string.find(normalized, "uver") or string.find(normalized, "maneu") then
-                    score = 2
-                elseif string.find(normalized, "index") then
-                    score = 1
-                end
-            end
-
-            if score > bestScore then
-                bestScore = score
-                bestMatch = child
-            end
+        if self:GetNeoNumericValue(child) ~= nil and string.find(string.lower(tostring(child.Name)), "index") then
+            return child
         end
-    end
-
-    if bestScore >= 0 then
-        return bestMatch
     end
 
     return nil
