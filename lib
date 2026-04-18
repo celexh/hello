@@ -14,7 +14,7 @@
             },
         })
 ]]
-
+print("doneloaded")
 if not math.clamp then
     math.clamp = function(val, min, max)
         return math.min(math.max(val, min), max)
