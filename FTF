@@ -92,7 +92,7 @@ local UI = {
     animatedScrollThumbY = nil,
     needsRedraw = true,
     shellDirty = true,
-    tabDirty = {true, true, true, true, true, true},
+    tabDirty = {true, true, true, true, true, true, true},
     hitboxes = {},
     hoveredId = nil,
     lastMousePressed = false,
@@ -118,6 +118,8 @@ local UI = {
     logoImageFailed = false,
     logoImageUnsupported = false,
     autoDoThread = nil,
+    antiCaptureThread = nil,
+    annoyNpcThread = nil,
     animationState = {
         tabHover = {},
         tabActive = {},
@@ -189,6 +191,7 @@ local UI = {
         NewBucket(),
         NewBucket(),
         NewBucket(),
+        NewBucket(),
     },
 
     tabs = {
@@ -197,6 +200,7 @@ local UI = {
         {name = "EXPLOITS"},
         {name = "BEAST"},
         {name = "STATS"},
+        {name = "TROLL"},
         {name = "SETTINGS"},
     },
 
@@ -219,6 +223,7 @@ local UI = {
         },
         {
             {id = "auto_do_toggle", type = "toggle", label = "Auto Pc Puzzle", description = "", value = false},
+            {id = "anti_capture_toggle", type = "toggle", label = "Anti-Capture", description = "", value = false},
             {id = "save_captured_toggle", type = "toggle", label = "Save Captured", description = "", value = false},
             {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", description = "", accent = "accent"},
         },
@@ -229,6 +234,10 @@ local UI = {
         },
         {
             {id = "stats_player_select", type = "dropdown_single", label = "Player", description = "", value = "", options = {}},
+        },
+        {
+            {id = "annoy_beast_front_toggle", type = "toggle", label = "Annoy Beast Front", description = "", value = false},
+            {id = "annoy_beast_back_toggle", type = "toggle", label = "Annoy Beast Back", description = "", value = false},
         },
         {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
@@ -840,8 +849,149 @@ function UI:IsLocalPlayerCaptured()
     return value == true or value == 1
 end
 
+function UI:IsLocalPlayerRagdolled()
+    local statsModule = LocalPlayer and LocalPlayer:FindFirstChild("TempPlayerStatsModule")
+    local ragdoll = statsModule and statsModule:FindFirstChild("Ragdoll")
+    local value = ragdoll and ragdoll.Value
+    return value == true or value == 1
+end
+
 function UI:BuildSaveCapturedCFrame(root)
     return root.CFrame * CFrame.new(0, -4.5, 0) * CFrame.Angles(math.rad(90), 0, 0)
+end
+
+function UI:GetBeastTargetRoot()
+    for _, obj in ipairs(self:GetFtfCharacterTargets()) do
+        if self:IsBeastModel(obj) then
+            local root = obj:FindFirstChild("HumanoidRootPart")
+            if root then
+                return obj, root
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+function UI:GetAnnoyBeastFrontPosition(beastRoot)
+    if not beastRoot then
+        return nil
+    end
+
+    return beastRoot.Position + (beastRoot.CFrame.LookVector * 20)
+end
+
+function UI:GetAnnoyBeastBackPosition(beastRoot)
+    if not beastRoot then
+        return nil
+    end
+
+    return beastRoot.Position - (beastRoot.CFrame.LookVector * 10)
+end
+
+function UI:GetAntiCapturePosition(beastRoot)
+    if not beastRoot then
+        return nil
+    end
+
+    return beastRoot.Position - (beastRoot.CFrame.LookVector * 30)
+end
+
+function UI:StartAntiCapture()
+    self:StopAntiCapture()
+
+    self.antiCaptureThread = task.spawn(function()
+        while true do
+            local control = self:GetControl(3, "anti_capture_toggle")
+            if not (control and control.value) then
+                task.wait(0.15)
+            else
+                if type(isrbxactive) == "function" then
+                    local ok, active = pcall(isrbxactive)
+                    if not ok or not active then
+                        task.wait(0.15)
+                        continue
+                    end
+                end
+
+                local localCharacter = LocalPlayer and LocalPlayer.Character
+                local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+
+                if localRoot and self:IsLocalPlayerRagdolled() and not self:IsLocalPlayerCaptured() and not self:IsLocalPlayerBeastNow() then
+                    local _, beastRoot = self:GetBeastTargetRoot()
+                    if beastRoot then
+                        local targetPosition = self:GetAntiCapturePosition(beastRoot)
+                        if targetPosition then
+                            localRoot.Position = targetPosition
+                        end
+                    end
+                end
+
+                task.wait(0.06)
+            end
+        end
+    end)
+end
+
+function UI:StopAntiCapture()
+    if self.antiCaptureThread then
+        task.cancel(self.antiCaptureThread)
+        self.antiCaptureThread = nil
+    end
+end
+
+function UI:StartAnnoyBeast()
+    self:StopAnnoyBeast()
+
+    self.annoyNpcThread = task.spawn(function()
+        while true do
+            local annoyBeastFrontControl = self:GetControl(6, "annoy_beast_front_toggle")
+            local annoyBeastBackControl = self:GetControl(6, "annoy_beast_back_toggle")
+            local annoyBeastFrontEnabled = annoyBeastFrontControl and annoyBeastFrontControl.value == true
+            local annoyBeastBackEnabled = annoyBeastBackControl and annoyBeastBackControl.value == true
+
+            if not annoyBeastFrontEnabled and not annoyBeastBackEnabled then
+                task.wait(0.15)
+            else
+                if type(isrbxactive) == "function" then
+                    local ok, active = pcall(isrbxactive)
+                    if not ok or not active then
+                        task.wait(0.15)
+                        continue
+                    end
+                end
+
+                local localCharacter = LocalPlayer and LocalPlayer.Character
+                local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+
+                if self:CanLocalPlayerAct() and localRoot and not self:IsLocalPlayerBeastNow() and not self:IsLocalPlayerCaptured() then
+                    local _, beastRoot = self:GetBeastTargetRoot()
+                    if beastRoot then
+                        if annoyBeastFrontEnabled then
+                            local targetPosition = self:GetAnnoyBeastFrontPosition(beastRoot)
+                            if targetPosition then
+                                localRoot.Position = targetPosition
+                            end
+                        elseif annoyBeastBackEnabled then
+                            local targetPosition = self:GetAnnoyBeastBackPosition(beastRoot)
+                            if targetPosition then
+                                localRoot.Position = targetPosition
+                            end
+                        end
+                    end
+                end
+
+                task.wait(0.06)
+            end
+        end
+    end)
+end
+
+function UI:StopAnnoyBeast()
+    if self.annoyNpcThread then
+        task.cancel(self.annoyNpcThread)
+        self.annoyNpcThread = nil
+    end
 end
 
 function UI:StartSaveCaptured()
@@ -883,7 +1033,7 @@ function UI:StartSaveCaptured()
                 local localCharacter = LocalPlayer and LocalPlayer.Character
                 local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
-                if (not self:IsLocalPlayerCaptured()) and self:CanLocalPlayerAct() and localRoot then
+                if (not self:IsLocalPlayerCaptured()) and (not self:IsLocalPlayerBeastNow()) and self:CanLocalPlayerAct() and localRoot then
                     local targetPlayer, targetRoot = self:GetCapturedPlayerTarget()
 
                     if targetPlayer and targetRoot then
@@ -1801,7 +1951,7 @@ function UI:ApplyAccentTheme(themeName)
 end
 
 function UI:UpdateRainbowAccent()
-    local accentControl = self:GetControl(6, "accent_theme")
+    local accentControl = self:GetControl(7, "accent_theme")
     if not accentControl or accentControl.value ~= "Rainbow" then
         return
     end
@@ -1857,12 +2007,12 @@ function UI:EnsureConfigStorage()
 end
 
 function UI:IsAutoSaveConfigEnabled()
-    local control = self:GetControl(6, "auto_save_config")
+    local control = self:GetControl(7, "auto_save_config")
     return control and control.value == true
 end
 
 function UI:AreAnimationsEnabled()
-    local control = self:GetControl(6, "ui_animations")
+    local control = self:GetControl(7, "ui_animations")
     return not control or control.value == true
 end
 
@@ -1917,17 +2067,17 @@ function UI:ApplyConfigData(data)
         end
     end
 
-    local widthControl = self:GetControl(6, "ui_scale")
+    local widthControl = self:GetControl(7, "ui_scale")
     if widthControl and widthControl.value then
         self.window.width = widthControl.value
     end
 
-    local heightControl = self:GetControl(6, "ui_height")
+    local heightControl = self:GetControl(7, "ui_height")
     if heightControl and heightControl.value then
         self.window.height = heightControl.value
     end
 
-    local accentControl = self:GetControl(6, "accent_theme")
+    local accentControl = self:GetControl(7, "accent_theme")
     if accentControl then
         self:ApplyAccentTheme(accentControl.value)
     end
@@ -1999,7 +2149,7 @@ function UI:NotifyPlayer(message, title, duration)
 end
 
 function UI:GetTweenSpeed()
-    local control = self:GetControl(6, "tween_speed")
+    local control = self:GetControl(7, "tween_speed")
     local value = control and tonumber(control.value) or 60
     return math.clamp(value or 60, 60, 200)
 end
@@ -2292,6 +2442,27 @@ function UI:HandleControlClick(control)
                 self:StartSaveCaptured()
             else
                 self:StopSaveCaptured()
+            end
+        end
+        if control.id == "anti_capture_toggle" then
+            if control.value then
+                self:StartAntiCapture()
+            else
+                self:StopAntiCapture()
+            end
+        end
+        if control.id == "annoy_beast_front_toggle" then
+            if control.value then
+                self:StartAnnoyBeast()
+            else
+                self:StopAnnoyBeast()
+            end
+        end
+        if control.id == "annoy_beast_back_toggle" then
+            if control.value then
+                self:StartAnnoyBeast()
+            else
+                self:StopAnnoyBeast()
             end
         end
         if control.id == "no_cooldown_runner" then
@@ -2905,8 +3076,15 @@ UI:RefreshEspEnabledState()
 if UI:GetControl(3, "auto_do_toggle") and UI:GetControl(3, "auto_do_toggle").value then
     UI:StartAutoDo()
 end
+if UI:GetControl(3, "anti_capture_toggle") and UI:GetControl(3, "anti_capture_toggle").value then
+    UI:StartAntiCapture()
+end
 if UI:GetControl(3, "save_captured_toggle") and UI:GetControl(3, "save_captured_toggle").value then
     UI:StartSaveCaptured()
+end
+if (UI:GetControl(6, "annoy_beast_front_toggle") and UI:GetControl(6, "annoy_beast_front_toggle").value)
+    or (UI:GetControl(6, "annoy_beast_back_toggle") and UI:GetControl(6, "annoy_beast_back_toggle").value) then
+    UI:StartAnnoyBeast()
 end
 UI:Render()
 
