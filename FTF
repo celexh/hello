@@ -645,14 +645,12 @@ function UI:RefreshComputerCache(force)
     end
 
     local results = {}
-    local seen = {}
 
-    for _, obj in ipairs(mapRoot:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name == "ComputerTrigger2" then
-            local parentModel = self:GetComputerTableAncestor(obj)
-            if parentModel and not seen[obj] then
-                seen[obj] = true
-                table.insert(results, obj)
+    for _, obj in ipairs(mapRoot:GetChildren()) do
+        if obj and obj:IsA("Model") and obj.Name == "ComputerTable" then
+            local screen = obj:FindFirstChild("Screen")
+            if screen and screen:IsA("BasePart") then
+                table.insert(results, screen)
             end
         end
     end
@@ -1124,12 +1122,37 @@ function UI:UpdateComputerEsp()
                 else
                     entry.box.Position = Vector2.new(boxX, boxY)
                     entry.box.Size = Vector2.new(width, height)
-                    entry.box.Color = Color3.fromRGB(88, 200, 255)
+                    local sourceColor = trigger.Color
+                    local r = sourceColor.R
+                    local g = sourceColor.G
+                    local b = sourceColor.B
+
+                    if r <= 1 and g <= 1 and b <= 1 then
+                        r = math.floor((r * 255) + 0.5)
+                        g = math.floor((g * 255) + 0.5)
+                        b = math.floor((b * 255) + 0.5)
+                    else
+                        r = math.floor(r + 0.5)
+                        g = math.floor(g + 0.5)
+                        b = math.floor(b + 0.5)
+                    end
+
+                    local labelText = "Hacked"
+
+                    if r == 13 and g == 105 and b == 172 then
+                        labelText = "PC Hackable"
+                    elseif r == 196 and g == 40 and b == 28 then
+                        labelText = "PC Errored"
+                    end
+
+                    local espColor = Color3.fromRGB(r, g, b)
+
+                    entry.box.Color = espColor
                     entry.box.Visible = true
 
-                    entry.label.Text = "PC"
+                    entry.label.Text = labelText
                     entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
-                    entry.label.Color = Color3.fromRGB(88, 200, 255)
+                    entry.label.Color = espColor
                     entry.label.Visible = true
                 end
             else
