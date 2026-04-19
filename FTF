@@ -143,15 +143,39 @@ local UI = {
     loadingBucket = NewBucket(),
     overlayBucket = NewBucket(),
     espObjects = {},
+    activeEspKeys = {
+        npc = {},
+        pc = {},
+        fp = {},
+        ed = {},
+    },
     ftfCharacterCache = {},
     lastFtfCharacterCacheRefresh = 0,
     computerCache = {},
+    freezePodCache = {},
+    exitDoorCache = {},
+    exitDoorColorCache = {},
     currentMapRoot = nil,
     lastComputerMapCheck = 0,
     lastComputerCacheRefresh = 0,
     computerCacheMap = nil,
+    freezePodCacheMap = nil,
+    exitDoorCacheMap = nil,
     computerCacheWarmupStartedAt = 0,
     computerEspWasEnabled = false,
+    freezePodEspWasEnabled = false,
+    exitDoorEspWasEnabled = false,
+    espControlCache = nil,
+    espEnabledState = {
+        npcPlayer = false,
+        npcBeast = false,
+        pc = false,
+        fp = false,
+        ed = false,
+    },
+    maxUpdateFps = 60,
+    minUpdateDelta = 1 / 60,
+    lastFrameTick = 0,
     confirmPopup = nil,
     tabBuckets = {
         NewBucket(),
@@ -177,12 +201,15 @@ local UI = {
             {id = "last_save_stat", type = "stat", label = "Last Config Save", value = "Never"},
         },
         {
-            {id = "npc_player_esp", type = "toggle", label = "NPC Player ESP", description = "", value = false},
-            {id = "npc_beast_esp", type = "toggle", label = "NPC Beast ESP", description = "", value = false},
+            {id = "npc_player_esp", type = "toggle", label = "Player ESP", description = "", value = false},
+            {id = "npc_beast_esp", type = "toggle", label = "Beast ESP", description = "", value = false},
             {id = "pc_esp", type = "toggle", label = "PC ESP", description = "", value = false},
+            {id = "freeze_pod_esp", type = "toggle", label = "Freeze Pod ESP", description = "", value = false},
+            {id = "exit_door_esp", type = "toggle", label = "Exit Door ESP", description = "", value = false},
         },
         {
             {id = "auto_do_toggle", type = "toggle", label = "Auto Pc Puzzle", description = "", value = false},
+            {id = "save_captured_toggle", type = "toggle", label = "Save Captured", description = "", value = false},
             {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", description = "", accent = "accent"},
         },
         {
@@ -473,6 +500,49 @@ function UI:HideEspPrefix(prefix)
     end
 end
 
+function UI:CleanupTrackedEspKeys(bucketKey, seen)
+    local tracked = self.activeEspKeys[bucketKey] or {}
+    for key, _ in pairs(tracked) do
+        if not seen[key] then
+            local entry = self.espObjects[key]
+            if entry then
+                self:HideEspEntry(entry)
+            end
+            tracked[key] = nil
+        end
+    end
+    self.activeEspKeys[bucketKey] = tracked
+end
+
+function UI:GetEspControlCache()
+    if self.espControlCache then
+        return self.espControlCache
+    end
+
+    self.espControlCache = {
+        npcPlayer = self:GetControl(2, "npc_player_esp"),
+        npcBeast = self:GetControl(2, "npc_beast_esp"),
+        pc = self:GetControl(2, "pc_esp"),
+        fp = self:GetControl(2, "freeze_pod_esp"),
+        ed = self:GetControl(2, "exit_door_esp"),
+    }
+
+    return self.espControlCache
+end
+
+function UI:RefreshEspEnabledState()
+    local cache = self:GetEspControlCache()
+    local state = self.espEnabledState
+
+    state.npcPlayer = cache.npcPlayer and cache.npcPlayer.value == true or false
+    state.npcBeast = cache.npcBeast and cache.npcBeast.value == true or false
+    state.pc = cache.pc and cache.pc.value == true or false
+    state.fp = cache.fp and cache.fp.value == true or false
+    state.ed = cache.ed and cache.ed.value == true or false
+
+    return state
+end
+
 function UI:IsFtfCharacterModel(model)
     if not model or not model:IsA("Model") then
         return false
@@ -602,6 +672,78 @@ function UI:GetComputerTargets()
     return self:RefreshComputerCache(false)
 end
 
+function UI:RefreshFreezePodCache(force)
+    local mapRoot = self:GetCurrentFtfMapRoot(false)
+
+    if not mapRoot then
+        self.freezePodCache = {}
+        self.freezePodCacheMap = nil
+        return self.freezePodCache
+    end
+
+    if not force and self.freezePodCacheMap == mapRoot and #self.freezePodCache > 0 then
+        return self.freezePodCache
+    end
+
+    local results = {}
+
+    for _, obj in ipairs(mapRoot:GetChildren()) do
+        if obj and obj:IsA("Model") and obj.Name == "FreezePod" then
+            local anchor = obj:FindFirstChild("BasePart")
+            if anchor and anchor:IsA("BasePart") then
+                table.insert(results, anchor)
+            end
+        end
+    end
+
+    self.freezePodCache = results
+    self.freezePodCacheMap = mapRoot
+    return results
+end
+
+function UI:GetFreezePodTargets()
+    return self:RefreshFreezePodCache(false)
+end
+
+function UI:RefreshExitDoorCache(force)
+    local mapRoot = self:GetCurrentFtfMapRoot(false)
+
+    if not mapRoot then
+        self.exitDoorCache = {}
+        self.exitDoorColorCache = {}
+        self.exitDoorCacheMap = nil
+        return self.exitDoorCache
+    end
+
+    if not force and self.exitDoorCacheMap == mapRoot and #self.exitDoorCache > 0 then
+        return self.exitDoorCache
+    end
+
+    local results = {}
+    local colors = {}
+
+    for _, obj in ipairs(mapRoot:GetChildren()) do
+        if obj and obj:IsA("Model") and obj.Name == "ExitDoor" then
+            local anchor = obj:FindFirstChild("ExitArea")
+            if anchor and anchor:IsA("BasePart") then
+                local light = obj:FindFirstChild("Light")
+                local lightColor = (light and light:IsA("BasePart") and light.Color) or Color3.fromRGB(255, 255, 0)
+                table.insert(results, anchor)
+                colors[anchor] = lightColor
+            end
+        end
+    end
+
+    self.exitDoorCache = results
+    self.exitDoorColorCache = colors
+    self.exitDoorCacheMap = mapRoot
+    return results
+end
+
+function UI:GetExitDoorTargets()
+    return self:RefreshExitDoorCache(false)
+end
+
 function UI:GetComputerTableAncestor(instance)
     local current = instance
     while current and current ~= workspace do
@@ -641,6 +783,142 @@ end
 function UI:IsLocalPlayerBeastNow()
     local character = LocalPlayer and LocalPlayer.Character
     return character and self:IsBeastModel(character) or false
+end
+
+function UI:CanLocalPlayerAct()
+    local character = LocalPlayer and LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+
+    if not character or not humanoid or not root then
+        return false
+    end
+
+    if humanoid.Health <= 0 then
+        return false
+    end
+
+    return true
+end
+
+function UI:GetCapturedPlayerTarget()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local statsModule = player:FindFirstChild("TempPlayerStatsModule")
+            local captured = statsModule and statsModule:FindFirstChild("Captured")
+            local capturedValue = captured and captured.Value
+
+            if capturedValue == true or capturedValue == 1 then
+                local character = player.Character
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    return player, root
+                end
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+function UI:BuildSaveCapturedCFrame(root)
+    return root.CFrame * CFrame.new(0, -4.5, 0) * CFrame.Angles(math.rad(90), 0, 0)
+end
+
+function UI:StartSaveCaptured()
+    self:StopSaveCaptured()
+
+    local interactKey = 0x45
+
+    self.saveCapturedThread = task.spawn(function()
+        local savedReturnCFrame = nil
+        local activeTargetUserId = nil
+
+        while true do
+            local control = self:GetControl(3, "save_captured_toggle")
+            if not (control and control.value) then
+                if savedReturnCFrame and self:CanLocalPlayerAct() then
+                    local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if localRoot then
+                        localRoot.CFrame = savedReturnCFrame
+                    end
+                end
+                savedReturnCFrame = nil
+                activeTargetUserId = nil
+                task.wait(0.15)
+            else
+                if type(isrbxactive) == "function" then
+                    local ok, active = pcall(isrbxactive)
+                    if not ok or not active then
+                        local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if savedReturnCFrame and localRoot then
+                            localRoot.CFrame = savedReturnCFrame
+                        end
+                        savedReturnCFrame = nil
+                        activeTargetUserId = nil
+                        task.wait(0.15)
+                        continue
+                    end
+                end
+
+                local localCharacter = LocalPlayer and LocalPlayer.Character
+                local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+
+                if self:CanLocalPlayerAct() and localRoot then
+                    local targetPlayer, targetRoot = self:GetCapturedPlayerTarget()
+
+                    if targetPlayer and targetRoot then
+                        if activeTargetUserId ~= targetPlayer.UserId or not savedReturnCFrame then
+                            savedReturnCFrame = localRoot.CFrame
+                            activeTargetUserId = targetPlayer.UserId
+                        end
+
+                        local targetCFrame = self:BuildSaveCapturedCFrame(targetRoot)
+                        localRoot.CFrame = targetCFrame
+                        keypress(interactKey)
+                        task.wait(0.03)
+                        keyrelease(interactKey)
+
+                        local statsModule = targetPlayer:FindFirstChild("TempPlayerStatsModule")
+                        local captured = statsModule and statsModule:FindFirstChild("Captured")
+                        local capturedValue = captured and captured.Value
+
+                        if capturedValue ~= true and capturedValue ~= 1 then
+                            if savedReturnCFrame and localRoot then
+                                localRoot.CFrame = savedReturnCFrame
+                            end
+                            savedReturnCFrame = nil
+                            activeTargetUserId = nil
+                            task.wait(0.1)
+                        else
+                            task.wait(0.06)
+                        end
+                    else
+                        if savedReturnCFrame and localRoot then
+                            localRoot.CFrame = savedReturnCFrame
+                        end
+                        savedReturnCFrame = nil
+                        activeTargetUserId = nil
+                        task.wait(0.15)
+                    end
+                else
+                    if savedReturnCFrame and localRoot then
+                        localRoot.CFrame = savedReturnCFrame
+                    end
+                    savedReturnCFrame = nil
+                    activeTargetUserId = nil
+                    task.wait(0.15)
+                end
+            end
+        end
+    end)
+end
+
+function UI:StopSaveCaptured()
+    if self.saveCapturedThread then
+        task.cancel(self.saveCapturedThread)
+        self.saveCapturedThread = nil
+    end
 end
 
 
@@ -698,13 +976,18 @@ function UI:StopAutoDo()
 end
 
 function UI:UpdateNpcEsp()
-    local playerEspControl = self:GetControl(2, "npc_player_esp")
-    local beastEspControl = self:GetControl(2, "npc_beast_esp")
-    local playerEspEnabled = playerEspControl and playerEspControl.value == true
-    local beastEspEnabled = beastEspControl and beastEspControl.value == true
+    local state = self.espEnabledState or self:RefreshEspEnabledState()
+    local playerEspEnabled = state.npcPlayer == true
+    local beastEspEnabled = state.npcBeast == true
 
     if not playerEspEnabled and not beastEspEnabled then
-        self:HideEspPrefix("game.Workspace")
+        for key, _ in pairs(self.activeEspKeys.npc or {}) do
+            local entry = self.espObjects[key]
+            if entry then
+                self:HideEspEntry(entry)
+            end
+        end
+        self.activeEspKeys.npc = {}
         return
     end
 
@@ -729,6 +1012,7 @@ function UI:UpdateNpcEsp()
                 local key = tostring(obj)
                 local entry = self:GetEspEntry(key)
                 seen[key] = true
+                self.activeEspKeys.npc[key] = true
 
                 if root and head then
                     local headPoint, headVisible = self:GetWorldToScreen(head.Position + Vector3.new(0, 0.6, 0))
@@ -777,21 +1061,20 @@ function UI:UpdateNpcEsp()
     end
 
     for key, entry in pairs(self.espObjects) do
-        if not seen[key] then
+        if self.activeEspKeys.npc[key] and not seen[key] then
             self:HideEspEntry(entry)
+            self.activeEspKeys.npc[key] = nil
         end
     end
 end
 
 function UI:UpdateComputerEsp()
-    local pcEspControl = self:GetControl(2, "pc_esp")
-    local pcEspEnabled = pcEspControl and pcEspControl.value == true
+    local state = self.espEnabledState or self:RefreshEspEnabledState()
+    local pcEspEnabled = state.pc == true
 
     if pcEspEnabled and not self.computerEspWasEnabled then
         self.computerCache = {}
         self.computerCacheMap = nil
-        self.currentMapRoot = nil
-        self.lastComputerMapCheck = 0
         self.lastComputerCacheRefresh = 0
         self.computerCacheWarmupStartedAt = tick()
     end
@@ -799,7 +1082,13 @@ function UI:UpdateComputerEsp()
     self.computerEspWasEnabled = pcEspEnabled
 
     if not pcEspEnabled then
-        self:HideEspPrefix("pc:")
+        for key, _ in pairs(self.activeEspKeys.pc or {}) do
+            local entry = self.espObjects[key]
+            if entry then
+                self:HideEspEntry(entry)
+            end
+        end
+        self.activeEspKeys.pc = {}
         return
     end
 
@@ -815,6 +1104,7 @@ function UI:UpdateComputerEsp()
             local entry = self:GetEspEntry(key)
             local screenPoint, visible = self:GetWorldToScreen(trigger.Position + Vector3.new(0, 1.5, 0))
             seen[key] = true
+            self.activeEspKeys.pc[key] = true
 
             if visible and screenPoint then
                 local width = 30
@@ -848,11 +1138,140 @@ function UI:UpdateComputerEsp()
         end
     end
 
-    for key, entry in pairs(self.espObjects) do
-        if string.sub(tostring(key), 1, 3) == "pc:" and not seen[key] then
-            self:HideEspEntry(entry)
+    self:CleanupTrackedEspKeys("pc", seen)
+end
+
+function UI:UpdateFreezePodEsp()
+    local state = self.espEnabledState or self:RefreshEspEnabledState()
+    local enabled = state.fp == true
+
+    if enabled and not self.freezePodEspWasEnabled then
+        self.freezePodCache = {}
+        self.freezePodCacheMap = nil
+    end
+
+    if not enabled then
+        for key, _ in pairs(self.activeEspKeys.fp or {}) do
+            local entry = self.espObjects[key]
+            if entry then
+                self:HideEspEntry(entry)
+            end
+        end
+        self.activeEspKeys.fp = {}
+        self.freezePodEspWasEnabled = false
+        return
+    end
+
+    local seen = {}
+    local uiLeft = self.window.x
+    local uiTop = self.window.y
+    local uiRight = self.window.x + self.window.width
+    local uiBottom = self.window.y + self.window.height
+
+    for index, part in ipairs(self:GetFreezePodTargets()) do
+        if part and part.Parent then
+            local key = "fp:" .. tostring(index)
+            local entry = self:GetEspEntry(key)
+            local screenPoint, visible = self:GetWorldToScreen(part.Position + Vector3.new(0, 1.5, 0))
+            seen[key] = true
+            self.activeEspKeys.fp[key] = true
+
+            if visible and screenPoint then
+                local width = 30
+                local height = 30
+                local boxX = math.floor(screenPoint.X - (width / 2))
+                local boxY = math.floor(screenPoint.Y - (height / 2))
+                local overlapsUI = self.uiVisible
+                    and (boxX + width) >= uiLeft
+                    and boxX <= uiRight
+                    and (boxY + height) >= uiTop
+                    and boxY <= uiBottom
+
+                if overlapsUI then
+                    self:HideEspEntry(entry)
+                else
+                    entry.box.Visible = false
+                    entry.label.Text = "FreezePod"
+                    entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
+                    entry.label.Color = Color3.fromRGB(0, 0, 245)
+                    entry.label.Visible = true
+                end
+            else
+                self:HideEspEntry(entry)
+            end
         end
     end
+
+    self:CleanupTrackedEspKeys("fp", seen)
+
+    self.freezePodEspWasEnabled = true
+end
+
+function UI:UpdateExitDoorEsp()
+    local state = self.espEnabledState or self:RefreshEspEnabledState()
+    local enabled = state.ed == true
+
+    if enabled and not self.exitDoorEspWasEnabled then
+        self.exitDoorCache = {}
+        self.exitDoorColorCache = {}
+        self.exitDoorCacheMap = nil
+    end
+
+    if not enabled then
+        for key, _ in pairs(self.activeEspKeys.ed or {}) do
+            local entry = self.espObjects[key]
+            if entry then
+                self:HideEspEntry(entry)
+            end
+        end
+        self.activeEspKeys.ed = {}
+        self.exitDoorEspWasEnabled = false
+        return
+    end
+
+    local seen = {}
+    local uiLeft = self.window.x
+    local uiTop = self.window.y
+    local uiRight = self.window.x + self.window.width
+    local uiBottom = self.window.y + self.window.height
+
+    for index, part in ipairs(self:GetExitDoorTargets()) do
+        if part and part.Parent then
+            local key = "ed:" .. tostring(index)
+            local entry = self:GetEspEntry(key)
+            local screenPoint, visible = self:GetWorldToScreen(part.Position + Vector3.new(0, 1.5, 0))
+            seen[key] = true
+            self.activeEspKeys.ed[key] = true
+
+            if visible and screenPoint then
+                local width = 30
+                local height = 30
+                local boxX = math.floor(screenPoint.X - (width / 2))
+                local boxY = math.floor(screenPoint.Y - (height / 2))
+                local overlapsUI = self.uiVisible
+                    and (boxX + width) >= uiLeft
+                    and boxX <= uiRight
+                    and (boxY + height) >= uiTop
+                    and boxY <= uiBottom
+
+                if overlapsUI then
+                    self:HideEspEntry(entry)
+                else
+                    entry.box.Visible = false
+                    entry.label.Text = "ExitDoor"
+                    entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
+                    entry.label.Color = self.exitDoorColorCache[part] or Color3.fromRGB(255, 255, 0)
+                    entry.label.Visible = true
+                end
+            else
+                self:HideEspEntry(entry)
+            end
+        end
+    end
+
+    self:CleanupTrackedEspKeys("ed", seen)
+
+    self.exitDoorEspWasEnabled = true
 end
 
 function UI:CreateRoundedBox(bucket, x, y, w, h, radius, color)
@@ -1617,6 +2036,15 @@ function UI:HandleControlClick(control)
         if control.id == "auto_do_toggle" then
             if control.value then
                 self:StartAutoDo()
+            else
+                self:StopAutoDo()
+            end
+        end
+        if control.id == "save_captured_toggle" then
+            if control.value then
+                self:StartSaveCaptured()
+            else
+                self:StopSaveCaptured()
             end
         end
         if control.id == "no_cooldown_runner" then
@@ -2208,8 +2636,13 @@ pcall(function()
 end)
 
 UI:RefreshHomeStats(true)
+UI:GetEspControlCache()
+UI:RefreshEspEnabledState()
 if UI:GetControl(3, "auto_do_toggle") and UI:GetControl(3, "auto_do_toggle").value then
     UI:StartAutoDo()
+end
+if UI:GetControl(3, "save_captured_toggle") and UI:GetControl(3, "save_captured_toggle").value then
+    UI:StartSaveCaptured()
 end
 UI:Render()
 
@@ -2217,6 +2650,20 @@ RunService.RenderStepped:Connect(function(dt)
     if not UI.isRunning then
         return
     end
+
+    local now = tick()
+    local minDelta = UI.minUpdateDelta or (1 / 60)
+    local lastTick = UI.lastFrameTick or 0
+
+    if lastTick > 0 and (now - lastTick) < minDelta then
+        return
+    end
+
+    if lastTick > 0 then
+        dt = now - lastTick
+    end
+
+    UI.lastFrameTick = now
 
     if UI.isBooting then
         local oldProgress = UI.bootVisualProgress or 0
@@ -2279,9 +2726,21 @@ RunService.RenderStepped:Connect(function(dt)
         UI:RefreshHomeStats(false)
     end)
 
+    UI:RefreshEspEnabledState()
+
     pcall(function()
-    UI:UpdateNpcEsp()
-    UI:UpdateComputerEsp()
+    if UI.espEnabledState.npcPlayer or UI.espEnabledState.npcBeast or next(UI.activeEspKeys.npc) ~= nil then
+        UI:UpdateNpcEsp()
+    end
+    if UI.espEnabledState.pc or next(UI.activeEspKeys.pc) ~= nil then
+        UI:UpdateComputerEsp()
+    end
+    if UI.espEnabledState.fp or next(UI.activeEspKeys.fp) ~= nil then
+        UI:UpdateFreezePodEsp()
+    end
+    if UI.espEnabledState.ed or next(UI.activeEspKeys.ed) ~= nil then
+        UI:UpdateExitDoorEsp()
+    end
     UI:UpdateBeastMovement()
     end)
 
