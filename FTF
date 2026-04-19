@@ -56,6 +56,10 @@ local AccentThemes = {
         accent = Color3.fromRGB(235, 235, 235),
         accentSoft = Color3.fromRGB(155, 155, 155),
     },
+    ["Rainbow"] = {
+        accent = Color3.fromRGB(54, 248, 87),
+        accentSoft = Color3.fromRGB(40, 180, 70),
+    },
 }
 
 local function NewBucket()
@@ -88,7 +92,7 @@ local UI = {
     animatedScrollThumbY = nil,
     needsRedraw = true,
     shellDirty = true,
-    tabDirty = {true, true, true, true, true},
+    tabDirty = {true, true, true, true, true, true},
     hitboxes = {},
     hoveredId = nil,
     lastMousePressed = false,
@@ -102,6 +106,7 @@ local UI = {
     lastToggleTick = 0,
     launchTick = tick(),
     lastHomeStatRefresh = 0,
+    lastStatsTabRefresh = 0,
     lastConfigSaveTick = nil,
     tweenSpeedWarned = false,
     expandedDropdown = nil,
@@ -183,6 +188,7 @@ local UI = {
         NewBucket(),
         NewBucket(),
         NewBucket(),
+        NewBucket(),
     },
 
     tabs = {
@@ -190,6 +196,7 @@ local UI = {
         {name = "ESP"},
         {name = "EXPLOITS"},
         {name = "BEAST"},
+        {name = "STATS"},
         {name = "SETTINGS"},
     },
 
@@ -221,9 +228,13 @@ local UI = {
             {id = "end_round_button", type = "button", label = "End Round", description = "", accent = "accent"},
         },
         {
+            {id = "stats_player_select", type = "dropdown_single", label = "Player", description = "", value = "", options = {}},
+        },
+        {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
+            {id = "ui_height", type = "slider", label = "UI Height", description = "", min = 300, max = 520, step = 10, value = 352},
             {id = "tween_speed", type = "slider", label = "Tween Speed", description = "", min = 60, max = 200, step = 5, value = 60},
-            {id = "accent_theme", type = "dropdown_single", label = "UI Color", description = "", value = "Green", options = {"Green", "Blue", "Red", "Orange", "Pink", "White"}},
+            {id = "accent_theme", type = "dropdown_single", label = "UI Color", description = "", value = "Green", options = {"Green", "Blue", "Red", "Orange", "Pink", "White", "Rainbow"}},
             {id = "ui_animations", type = "checkbox", label = "Animations", description = "", value = true},
             {id = "auto_save_config", type = "toggle", label = "Auto Save Config", description = "", value = true},
             {id = "discord_button", type = "button", label = "Discord", description = "", accent = "accent"},
@@ -1402,6 +1413,8 @@ function UI:ResetContentAnimation()
 end
 
 function UI:UpdateAnimations(dt)
+    self:UpdateRainbowAccent()
+
     if not self:AreAnimationsEnabled() then
         self.uiAlpha = self.uiVisible and 1 or 0
         self.uiOffset = 0
@@ -1580,6 +1593,10 @@ end
 function UI:GetActiveControls()
     local tabControls = self.controls[self.selectedTab] or {}
 
+    if self.selectedTab == 5 then
+        return self.statsTabControls or tabControls
+    end
+
     if self.selectedTab ~= 2 then
         return tabControls
     end
@@ -1619,6 +1636,119 @@ function UI:SetStatValue(controlId, value)
         control.value = nextValue
         self.tabDirty[1] = true
         self.needsRedraw = true
+    end
+end
+
+function UI:FormatSavedPlayerStatValue(instance)
+    if not instance then
+        return "-"
+    end
+
+    local ok, value = pcall(function()
+        return instance.Value
+    end)
+
+    if ok then
+        return tostring(value)
+    end
+
+    return tostring(instance.ClassName or "-")
+end
+
+function UI:RefreshStatsTab(force)
+    local now = tick()
+    if not force and (now - (self.lastStatsTabRefresh or 0)) < 0.35 then
+        return
+    end
+
+    self.lastStatsTabRefresh = now
+
+    local dropdown = self:GetControl(5, "stats_player_select")
+    if not dropdown then
+        return
+    end
+
+    local playerNames = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        table.insert(playerNames, player.Name)
+    end
+
+    table.sort(playerNames, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+
+    local optionsSignature = table.concat(playerNames, "\0")
+    if optionsSignature ~= (self.statsPlayerOptionsSignature or "") then
+        dropdown.options = playerNames
+        self.statsPlayerOptionsSignature = optionsSignature
+    end
+
+    local selectedName = tostring(dropdown.value or "")
+    local selectionValid = false
+    for _, playerName in ipairs(playerNames) do
+        if playerName == selectedName then
+            selectionValid = true
+            break
+        end
+    end
+
+    if not selectionValid then
+        local defaultName = ""
+        if LocalPlayer and table.find(playerNames, LocalPlayer.Name) then
+            defaultName = LocalPlayer.Name
+        else
+            defaultName = playerNames[1] or ""
+        end
+        dropdown.value = defaultName
+        selectedName = defaultName
+    end
+
+    local selectedPlayer = nil
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == selectedName then
+            selectedPlayer = player
+            break
+        end
+    end
+
+    local builtControls = {dropdown}
+    local signatureParts = {selectedName, optionsSignature}
+    local statsModule = selectedPlayer and selectedPlayer:FindFirstChild("SavedPlayerStatsModule") or nil
+
+    if statsModule then
+        local children = statsModule:GetChildren()
+        table.sort(children, function(a, b)
+            return string.lower(a.Name) < string.lower(b.Name)
+        end)
+
+        for _, child in ipairs(children) do
+            local statValue = self:FormatSavedPlayerStatValue(child)
+            table.insert(builtControls, {
+                id = "saved_stats_" .. child.Name,
+                type = "stat",
+                label = child.Name,
+                value = statValue,
+            })
+            table.insert(signatureParts, child.Name .. "=" .. statValue)
+        end
+    else
+        local fallbackValue = selectedPlayer and "No SavedPlayerStatsModule" or "No player selected"
+        table.insert(builtControls, {
+            id = "saved_stats_status",
+            type = "stat",
+            label = "Status",
+            value = fallbackValue,
+        })
+        table.insert(signatureParts, "Status=" .. fallbackValue)
+    end
+
+    local nextSignature = table.concat(signatureParts, "\n")
+    if nextSignature ~= (self.statsTabSignature or "") then
+        self.statsTabControls = builtControls
+        self.statsTabSignature = nextSignature
+        self:MarkTabDirty(5)
+    else
+        self.statsTabControls = builtControls
     end
 end
 
@@ -1670,6 +1800,36 @@ function UI:ApplyAccentTheme(themeName)
     Theme.accentSoft = palette.accentSoft
 end
 
+function UI:UpdateRainbowAccent()
+    local accentControl = self:GetControl(6, "accent_theme")
+    if not accentControl or accentControl.value ~= "Rainbow" then
+        return
+    end
+
+    local hue = (tick() * 0.12) % 1
+    local accent = Color3.fromHSV(hue, 0.72, 1)
+    local accentSoft = Color3.fromHSV(hue, 0.62, 0.78)
+
+    local previousAccent = Theme.accent
+    local previousAccentSoft = Theme.accentSoft
+    Theme.accent = accent
+    Theme.accentSoft = accentSoft
+
+    local accentChanged = not previousAccent
+        or math.abs(previousAccent.R - accent.R) > 0.01
+        or math.abs(previousAccent.G - accent.G) > 0.01
+        or math.abs(previousAccent.B - accent.B) > 0.01
+    local accentSoftChanged = not previousAccentSoft
+        or math.abs(previousAccentSoft.R - accentSoft.R) > 0.01
+        or math.abs(previousAccentSoft.G - accentSoft.G) > 0.01
+        or math.abs(previousAccentSoft.B - accentSoft.B) > 0.01
+
+    if accentChanged or accentSoftChanged then
+        self:MarkShellDirty()
+        self:MarkCurrentTabDirty()
+    end
+end
+
 function UI:GetConfigFolderPath()
     return self.configFolderName or "WindyBase"
 end
@@ -1697,12 +1857,12 @@ function UI:EnsureConfigStorage()
 end
 
 function UI:IsAutoSaveConfigEnabled()
-    local control = self:GetControl(5, "auto_save_config")
+    local control = self:GetControl(6, "auto_save_config")
     return control and control.value == true
 end
 
 function UI:AreAnimationsEnabled()
-    local control = self:GetControl(5, "ui_animations")
+    local control = self:GetControl(6, "ui_animations")
     return not control or control.value == true
 end
 
@@ -1757,12 +1917,17 @@ function UI:ApplyConfigData(data)
         end
     end
 
-    local widthControl = self:GetControl(5, "ui_scale")
+    local widthControl = self:GetControl(6, "ui_scale")
     if widthControl and widthControl.value then
         self.window.width = widthControl.value
     end
 
-    local accentControl = self:GetControl(5, "accent_theme")
+    local heightControl = self:GetControl(6, "ui_height")
+    if heightControl and heightControl.value then
+        self.window.height = heightControl.value
+    end
+
+    local accentControl = self:GetControl(6, "accent_theme")
     if accentControl then
         self:ApplyAccentTheme(accentControl.value)
     end
@@ -1834,7 +1999,7 @@ function UI:NotifyPlayer(message, title, duration)
 end
 
 function UI:GetTweenSpeed()
-    local control = self:GetControl(5, "tween_speed")
+    local control = self:GetControl(6, "tween_speed")
     local value = control and tonumber(control.value) or 60
     return math.clamp(value or 60, 60, 200)
 end
@@ -1996,6 +2161,11 @@ function UI:SetSliderValue(control, percent)
         control.value = steppedValue
         if control.id == "ui_scale" then
             self.window.width = steppedValue
+            self:UpdateScrollLimit()
+            self:MarkShellDirty()
+        elseif control.id == "ui_height" then
+            self.window.height = steppedValue
+            self:UpdateScrollLimit()
             self:MarkShellDirty()
         elseif control.id == "tween_speed" then
             if steppedValue > 120 and not self.tweenSpeedWarned then
@@ -2171,6 +2341,8 @@ function UI:HandleDropdownOption(control, option)
     if control.id == "accent_theme" then
         self:ApplyAccentTheme(control.value)
         self:MarkShellDirty()
+    elseif control.id == "stats_player_select" then
+        self:RefreshStatsTab(true)
     end
 
     self:UpdateScrollLimit()
@@ -2565,8 +2737,8 @@ function UI:BuildActiveTab()
         end
         local cardH = baseHeight + extraHeight
         local baseCardHeight = cardH - extraHeight
-        local controlCardX = isPcFilterChild and (cardX + 18) or cardX
-        local controlCardW = isPcFilterChild and (cardW - 40) or cardW
+        local controlCardX = isPcFilterChild and (cardX + 12) or cardX
+        local controlCardW = isPcFilterChild and (cardW - 16) or cardW
 
         local shouldDrawCard = drawY >= y and (drawY + baseCardHeight) <= bottomY
 
@@ -2727,6 +2899,7 @@ pcall(function()
 end)
 
 UI:RefreshHomeStats(true)
+UI:RefreshStatsTab(true)
 UI:GetEspControlCache()
 UI:RefreshEspEnabledState()
 if UI:GetControl(3, "auto_do_toggle") and UI:GetControl(3, "auto_do_toggle").value then
@@ -2815,6 +2988,10 @@ RunService.RenderStepped:Connect(function(dt)
 
     pcall(function()
         UI:RefreshHomeStats(false)
+    end)
+
+    pcall(function()
+        UI:RefreshStatsTab(false)
     end)
 
     UI:RefreshEspEnabledState()
