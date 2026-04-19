@@ -204,6 +204,9 @@ local UI = {
             {id = "npc_player_esp", type = "toggle", label = "Player ESP", description = "", value = false},
             {id = "npc_beast_esp", type = "toggle", label = "Beast ESP", description = "", value = false},
             {id = "pc_esp", type = "toggle", label = "PC ESP", description = "", value = false},
+            {id = "pc_esp_filters_section", type = "section", label = "PC ESP Filters"},
+            {id = "hide_hacked_pcs", type = "toggle", label = "Hide Hacked PC's", description = "", value = false},
+            {id = "hide_error_pcs", type = "toggle", label = "Hide Error PC's", description = "", value = false},
             {id = "freeze_pod_esp", type = "toggle", label = "Freeze Pod ESP", description = "", value = false},
             {id = "exit_door_esp", type = "toggle", label = "Exit Door ESP", description = "", value = false},
         },
@@ -1069,6 +1072,10 @@ end
 function UI:UpdateComputerEsp()
     local state = self.espEnabledState or self:RefreshEspEnabledState()
     local pcEspEnabled = state.pc == true
+    local hideHackedControl = self:GetControl(2, "hide_hacked_pcs")
+    local hideErroredControl = self:GetControl(2, "hide_error_pcs")
+    local hideHacked = hideHackedControl and hideHackedControl.value == true
+    local hideErrored = hideErroredControl and hideErroredControl.value == true
 
     if pcEspEnabled and not self.computerEspWasEnabled then
         self.computerCache = {}
@@ -1138,22 +1145,34 @@ function UI:UpdateComputerEsp()
                     end
 
                     local labelText = "Hacked"
+                    local shouldHide = false
 
                     if r == 13 and g == 105 and b == 172 then
                         labelText = "PC Hackable"
                     elseif r == 196 and g == 40 and b == 28 then
-                        labelText = "PC Errored"
+                        if hideErrored then
+                            labelText = "PC Hackable"
+                            r, g, b = 13, 105, 172
+                        else
+                            labelText = "PC Errored"
+                        end
+                    elseif hideHacked then
+                        shouldHide = true
                     end
 
                     local espColor = Color3.fromRGB(r, g, b)
 
-                    entry.box.Color = espColor
-                    entry.box.Visible = true
+                    if shouldHide then
+                        self:HideEspEntry(entry)
+                    else
+                        entry.box.Color = espColor
+                        entry.box.Visible = true
 
-                    entry.label.Text = labelText
-                    entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
-                    entry.label.Color = espColor
-                    entry.label.Visible = true
+                        entry.label.Text = labelText
+                        entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
+                        entry.label.Color = espColor
+                        entry.label.Visible = true
+                    end
                 end
             else
                 self:HideEspEntry(entry)
@@ -1552,7 +1571,28 @@ function UI:IsMousePressed()
 end
 
 function UI:GetActiveControls()
-    return self.controls[self.selectedTab] or {}
+    local tabControls = self.controls[self.selectedTab] or {}
+
+    if self.selectedTab ~= 2 then
+        return tabControls
+    end
+
+    local pcEspControl = self:GetControl(2, "pc_esp")
+    local pcEspEnabled = pcEspControl and pcEspControl.value == true
+    local filtered = {}
+
+    for _, control in ipairs(tabControls) do
+        local controlId = control.id
+        local isPcSubsectionControl = controlId == "pc_esp_filters_section"
+            or controlId == "hide_hacked_pcs"
+            or controlId == "hide_error_pcs"
+
+        if (not isPcSubsectionControl) or pcEspEnabled then
+            table.insert(filtered, control)
+        end
+    end
+
+    return filtered
 end
 
 function UI:GetControl(tabIndex, controlId)
@@ -1885,8 +1925,15 @@ function UI:UpdateScrollLimit()
     local contentHeight = 28
 
     for _, control in ipairs(self:GetActiveControls()) do
-        contentHeight = contentHeight + ((control.type == "stat") and 54 or 98)
-        if self.expandedDropdown == control.id and control.options then
+        local controlHeight = 98
+        if control.type == "stat" then
+            controlHeight = 54
+        elseif control.type == "section" then
+            controlHeight = 34
+        end
+
+        contentHeight = contentHeight + controlHeight
+        if control.type ~= "section" and self.expandedDropdown == control.id and control.options then
             contentHeight = contentHeight + (#control.options * 30) + 10
         end
     end
@@ -2496,12 +2543,23 @@ function UI:BuildActiveTab()
     local bottomY = y + height
 
     for _, control in ipairs(self:GetActiveControls()) do
+        local isPcFilterChild = control.id == "hide_hacked_pcs" or control.id == "hide_error_pcs"
         local dropdownProgress = self.animationState.dropdownOpen[control.id] or ((self.expandedDropdown == control.id) and 1 or 0)
         local expanded = dropdownProgress > 0.01
         local optionCount = control.options and #control.options or 0
         local extraHeight = math.floor((((optionCount) * 30) + 8) * dropdownProgress)
-        local cardH = ((control.type == "slider") and 56 or 44) + extraHeight
+        local baseHeight = 44
+        if control.type == "slider" then
+            baseHeight = 56
+        elseif control.type == "section" then
+            baseHeight = 20
+        elseif isPcFilterChild then
+            baseHeight = 34
+        end
+        local cardH = baseHeight + extraHeight
         local baseCardHeight = cardH - extraHeight
+        local controlCardX = isPcFilterChild and (cardX + 18) or cardX
+        local controlCardW = isPcFilterChild and (cardW - 40) or cardW
 
         local shouldDrawCard = drawY >= y and (drawY + baseCardHeight) <= bottomY
 
@@ -2510,31 +2568,34 @@ function UI:BuildActiveTab()
                 self:DrawCardFrame(bucket, cardX, drawY, cardW, baseCardHeight, Theme.border)
                 self:CreateText(bucket, control.label, cardX + 16, drawY + 16, Theme.textMuted, 13, false)
                 self:CreateRightText(bucket, tostring(control.value or "-"), cardX + cardW - 18, drawY + 16, Theme.text, 13)
+            elseif control.type == "section" then
+                self:CreateText(bucket, control.label, cardX + 6, drawY + 4, Theme.textDim, 12, false)
+                self:CreateLine(bucket, cardX + 120, drawY + 10, cardX + cardW - 8, drawY + 10, Theme.borderSoft, 0.8, 1)
             else
                 local hovered = self.animationState.controlHover[control.id] or 0
-                self:DrawCardFrame(bucket, cardX, drawY, cardW, baseCardHeight, LerpColor(Theme.border, Theme.topHighlight, hovered))
-                self:CreateText(bucket, control.label, cardX + 16, drawY + 16, Theme.text, 13, false)
+                self:DrawCardFrame(bucket, controlCardX, drawY, controlCardW, baseCardHeight, LerpColor(Theme.border, Theme.topHighlight, hovered))
+                self:CreateText(bucket, control.label, controlCardX + 16, drawY + (isPcFilterChild and 11 or 16), Theme.text, isPcFilterChild and 12 or 13, false)
 
                 if control.type == "toggle" then
-                    self:DrawToggle(bucket, control, cardX + cardW - 32, drawY + 14, 16, 16)
+                    self:DrawToggle(bucket, control, controlCardX + controlCardW - 32, drawY + (isPcFilterChild and 9 or 14), 16, 16)
                 elseif control.type == "checkbox" then
-                    self:DrawCheckbox(bucket, control, cardX + cardW - 32, drawY + 14, 16, 16)
+                    self:DrawCheckbox(bucket, control, controlCardX + controlCardW - 32, drawY + (isPcFilterChild and 9 or 14), 16, 16)
                 elseif control.type == "button" then
-                    self:DrawButton(bucket, control, cardX + cardW - 128, drawY + 10, 114, 24)
+                    self:DrawButton(bucket, control, controlCardX + controlCardW - 128, drawY + 10, 114, 24)
                 elseif control.type == "slider" then
-                    self:DrawSlider(bucket, control, cardX + 16, drawY + 32, cardW - 86, 18)
+                    self:DrawSlider(bucket, control, controlCardX + 16, drawY + 32, controlCardW - 86, 18)
                 else
-                    self:DrawDropdown(bucket, control, cardX + 176, drawY + 10, cardW - 192, 24)
+                    self:DrawDropdown(bucket, control, controlCardX + 176, drawY + 10, controlCardW - 192, 24)
                 end
 
                 if control.type == "slider" then
-                    self:RegisterHitbox(control.id, cardX + 16, drawY + 26, cardW - 62, 24, function()
+                    self:RegisterHitbox(control.id, controlCardX + 16, drawY + 26, controlCardW - 62, 24, function()
                         self.draggingSlider = true
                         self.activeSlider = control
                         self:SetSliderFromMouse(control, self:GetMouseLocation().X)
                     end, 2)
                 else
-                    self:RegisterHitbox(control.id, cardX, drawY, cardW, baseCardHeight, function()
+                    self:RegisterHitbox(control.id, controlCardX, drawY, controlCardW, baseCardHeight, function()
                         self:HandleControlClick(control)
                     end, 1)
                 end
@@ -2542,9 +2603,9 @@ function UI:BuildActiveTab()
                 if expanded then
                     local listY = drawY + baseCardHeight
                     local listH = math.max(0, extraHeight - 2)
-                    self:CreateSquare(bucket, cardX, listY, cardW, listH, Theme.shell, 1, true)
-                    self:CreateSquare(bucket, cardX, listY, cardW, listH, Theme.border, dropdownProgress, false, 1)
-                    self:CreateLine(bucket, cardX + 1, listY + 1, cardX + cardW - 2, listY + 1, Theme.topHighlight, 0.35 * dropdownProgress, 1)
+                    self:CreateSquare(bucket, controlCardX, listY, controlCardW, listH, Theme.shell, 1, true)
+                    self:CreateSquare(bucket, controlCardX, listY, controlCardW, listH, Theme.border, dropdownProgress, false, 1)
+                    self:CreateLine(bucket, controlCardX + 1, listY + 1, controlCardX + controlCardW - 2, listY + 1, Theme.topHighlight, 0.35 * dropdownProgress, 1)
 
                     for optionIndex, option in ipairs(control.options) do
                         local rowY = listY + 4 + ((optionIndex - 1) * 30)
@@ -2555,18 +2616,18 @@ function UI:BuildActiveTab()
                         local optionHovered = self.hoveredId == optionHoverId
 
                         if rowY + 26 <= listY + listH + 2 then
-                            self:CreateSquare(bucket, cardX + 4, rowY, cardW - 8, 26, selected and Theme.accentSoft or (optionHovered and Theme.panelAlt or Theme.panel), dropdownProgress, true)
-                            self:CreateSquare(bucket, cardX + 4, rowY, cardW - 8, 26, selected and Theme.accent or (optionHovered and Theme.topHighlight or Theme.borderSoft), dropdownProgress, false, 1)
+                            self:CreateSquare(bucket, controlCardX + 4, rowY, controlCardW - 8, 26, selected and Theme.accentSoft or (optionHovered and Theme.panelAlt or Theme.panel), dropdownProgress, true)
+                            self:CreateSquare(bucket, controlCardX + 4, rowY, controlCardW - 8, 26, selected and Theme.accent or (optionHovered and Theme.topHighlight or Theme.borderSoft), dropdownProgress, false, 1)
                             local previousAlpha = self.renderAlpha
                             self.renderAlpha = previousAlpha * dropdownProgress
-                            self:CreateText(bucket, option, cardX + 14, rowY + 6, Theme.text, 12, false)
+                            self:CreateText(bucket, option, controlCardX + 14, rowY + 6, Theme.text, 12, false)
                             self.renderAlpha = previousAlpha
                             if selected then
-                                self:CreateSquare(bucket, cardX + cardW - 24, rowY + 8, 8, 8, Theme.accent, dropdownProgress, true)
+                                self:CreateSquare(bucket, controlCardX + controlCardW - 24, rowY + 8, 8, 8, Theme.accent, dropdownProgress, true)
                             end
 
                             if dropdownProgress > 0.96 then
-                                self:RegisterHitbox(optionHoverId, cardX + 4, rowY, cardW - 8, 26, function()
+                                self:RegisterHitbox(optionHoverId, controlCardX + 4, rowY, controlCardW - 8, 26, function()
                                     self:HandleDropdownOption(control, option)
                                 end, 2)
                             end
