@@ -108,6 +108,7 @@ local UI = {
     lastHomeStatRefresh = 0,
     lastStatsTabRefresh = 0,
     lastConfigSaveTick = nil,
+    startupDragNoticeShown = false,
     tweenSpeedWarned = false,
     expandedDropdown = nil,
     selectedTab = 1,
@@ -1763,6 +1764,9 @@ function UI:GetControl(tabIndex, controlId)
     return nil
 end
 
+error("Matcha:2751: attempt to index nil with 'NotifyPlayer'")
+-- hahahhhahahaahhaahhahahaahahahhaahhahaahh noob
+
 function UI:SetStatValue(controlId, value)
     local control = self:GetControl(1, controlId)
     local nextValue = tostring(value or "")
@@ -2853,6 +2857,10 @@ function UI:BuildLoadingScreen()
                 self.renderScale = 1
                 self.contentAlpha = 1
                 self.contentOffset = 0
+            end
+            if not self.startupDragNoticeShown then
+                self.startupDragNoticeShown = true
+                self:NotifyPlayer("You can now drag the UI from any empty area.", "Windy", 4)
             end
             self.needsRedraw = true
         end, 3)
