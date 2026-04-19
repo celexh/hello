@@ -822,6 +822,13 @@ function UI:GetCapturedPlayerTarget()
     return nil, nil
 end
 
+function UI:IsLocalPlayerCaptured()
+    local statsModule = LocalPlayer and LocalPlayer:FindFirstChild("TempPlayerStatsModule")
+    local captured = statsModule and statsModule:FindFirstChild("Captured")
+    local value = captured and captured.Value
+    return value == true or value == 1
+end
+
 function UI:BuildSaveCapturedCFrame(root)
     return root.CFrame * CFrame.new(0, -4.5, 0) * CFrame.Angles(math.rad(90), 0, 0)
 end
@@ -865,7 +872,7 @@ function UI:StartSaveCaptured()
                 local localCharacter = LocalPlayer and LocalPlayer.Character
                 local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
-                if self:CanLocalPlayerAct() and localRoot then
+                if (not self:IsLocalPlayerCaptured()) and self:CanLocalPlayerAct() and localRoot then
                     local targetPlayer, targetRoot = self:GetCapturedPlayerTarget()
 
                     if targetPlayer and targetRoot then
