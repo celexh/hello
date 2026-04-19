@@ -906,14 +906,6 @@ function UI:StartAntiCapture()
             if not (control and control.value) then
                 task.wait(0.15)
             else
-                if type(isrbxactive) == "function" then
-                    local ok, active = pcall(isrbxactive)
-                    if not ok or not active then
-                        task.wait(0.15)
-                        continue
-                    end
-                end
-
                 local localCharacter = LocalPlayer and LocalPlayer.Character
                 local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
@@ -953,14 +945,6 @@ function UI:StartAnnoyBeast()
             if not annoyBeastFrontEnabled and not annoyBeastBackEnabled then
                 task.wait(0.15)
             else
-                if type(isrbxactive) == "function" then
-                    local ok, active = pcall(isrbxactive)
-                    if not ok or not active then
-                        task.wait(0.15)
-                        continue
-                    end
-                end
-
                 local localCharacter = LocalPlayer and LocalPlayer.Character
                 local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
@@ -1016,20 +1000,6 @@ function UI:StartSaveCaptured()
                 activeTargetUserId = nil
                 task.wait(0.15)
             else
-                if type(isrbxactive) == "function" then
-                    local ok, active = pcall(isrbxactive)
-                    if not ok or not active then
-                        local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if savedReturnCFrame and localRoot then
-                            localRoot.CFrame = savedReturnCFrame
-                        end
-                        savedReturnCFrame = nil
-                        activeTargetUserId = nil
-                        task.wait(0.15)
-                        continue
-                    end
-                end
-
                 local localCharacter = LocalPlayer and LocalPlayer.Character
                 local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 
@@ -1044,9 +1014,16 @@ function UI:StartSaveCaptured()
 
                         local targetCFrame = self:BuildSaveCapturedCFrame(targetRoot)
                         localRoot.CFrame = targetCFrame
-                        keypress(interactKey)
-                        task.wait(0.03)
-                        keyrelease(interactKey)
+                        local shouldPressInteract = true
+                        if type(isrbxactive) == "function" then
+                            local ok, active = pcall(isrbxactive)
+                            shouldPressInteract = ok and active == true
+                        end
+                        if shouldPressInteract then
+                            keypress(interactKey)
+                            task.wait(0.03)
+                            keyrelease(interactKey)
+                        end
 
                         local statsModule = targetPlayer:FindFirstChild("TempPlayerStatsModule")
                         local captured = statsModule and statsModule:FindFirstChild("Captured")
@@ -1117,11 +1094,18 @@ function UI:StartAutoDo()
                             local diff = math.abs(pinRotation - baseRotation)
                             if diff > 180 then diff = 360 - diff end
                             if diff <= tolerance and not hasPressed then
-                                task.wait(0.08)
-                                keypress(eKey)
-                                task.wait(0.05)
-                                keyrelease(eKey)
-                                hasPressed = true
+                                local shouldPressInteract = true
+                                if type(isrbxactive) == "function" then
+                                    local focusOk, isActive = pcall(isrbxactive)
+                                    shouldPressInteract = focusOk and isActive == true
+                                end
+                                if shouldPressInteract then
+                                    task.wait(0.08)
+                                    keypress(eKey)
+                                    task.wait(0.05)
+                                    keyrelease(eKey)
+                                    hasPressed = true
+                                end
                             end
                         end
                     else
@@ -2592,15 +2576,23 @@ function UI:HandleInput()
     end
 
     local hovered = nil
-    for index = #self.hitboxes, 1, -1 do
-        local hitbox = self.hitboxes[index]
+    local hoveredHitbox = nil
+    local hoveredPriority = -math.huge
+    local hoveredIndex = -1
+    for index, hitbox in ipairs(self.hitboxes) do
         if mousePos.X >= hitbox.x and mousePos.X <= hitbox.x + hitbox.w and mousePos.Y >= hitbox.y and mousePos.Y <= hitbox.y + hitbox.h then
-            hovered = hitbox.id
-            if mouseDown and not self.lastMousePressed and hitbox.callback then
-                hitbox.callback()
+            local hitboxPriority = hitbox.priority or 0
+            if hitboxPriority > hoveredPriority or (hitboxPriority == hoveredPriority and index > hoveredIndex) then
+                hovered = hitbox.id
+                hoveredHitbox = hitbox
+                hoveredPriority = hitboxPriority
+                hoveredIndex = index
             end
-            break
         end
+    end
+
+    if hoveredHitbox and mouseDown and not self.lastMousePressed and hoveredHitbox.callback then
+        hoveredHitbox.callback()
     end
 
     if hovered ~= self.hoveredId then
@@ -2689,12 +2681,12 @@ function UI:BuildShell()
 
     self:CreateText(bucket, "Z = toggle", wx + ww - 72, wy + wh - 16, Theme.textMuted, 12, false)
 
-    self:RegisterHitbox("window_drag", wx, wy, ww, 18, function()
+    self:RegisterHitbox("window_drag", wx, wy, ww, wh, function()
         self.draggingWindow = true
         local mousePos = self:GetMouseLocation()
         self.dragOffsetX = mousePos.X - wx
         self.dragOffsetY = mousePos.Y - wy
-    end, 1)
+    end, 0)
 
     bucket.built = true
     bucket.deferVisible = false
