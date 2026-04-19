@@ -56,6 +56,10 @@ local AccentThemes = {
         accent = Color3.fromRGB(235, 235, 235),
         accentSoft = Color3.fromRGB(155, 155, 155),
     },
+    ["Black"] = {
+        accent = Color3.fromRGB(18, 18, 18),
+        accentSoft = Color3.fromRGB(48, 48, 48),
+    },
     ["Rainbow"] = {
         accent = Color3.fromRGB(54, 248, 87),
         accentSoft = Color3.fromRGB(40, 180, 70),
@@ -244,7 +248,7 @@ local UI = {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
             {id = "ui_height", type = "slider", label = "UI Height", description = "", min = 300, max = 520, step = 10, value = 352},
             {id = "tween_speed", type = "slider", label = "Tween Speed", description = "", min = 60, max = 200, step = 5, value = 60},
-            {id = "accent_theme", type = "dropdown_single", label = "UI Color", description = "", value = "Green", options = {"Green", "Blue", "Red", "Orange", "Pink", "White", "Rainbow"}},
+            {id = "accent_theme", type = "dropdown_single", label = "UI Color", description = "", value = "Green", options = {"Green", "Blue", "Red", "Orange", "Pink", "White", "Black", "Rainbow"}},
             {id = "ui_animations", type = "checkbox", label = "Animations", description = "", value = true},
             {id = "auto_save_config", type = "toggle", label = "Auto Save Config", description = "", value = true},
             {id = "discord_button", type = "button", label = "Discord", description = "", accent = "accent"},
