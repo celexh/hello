@@ -861,6 +861,13 @@ function UI:IsLocalPlayerRagdolled()
     return value == true or value == 1
 end
 
+function UI:IsLocalPlayerCrawling()
+    local statsModule = LocalPlayer and LocalPlayer:FindFirstChild("TempPlayerStatsModule")
+    local crawling = statsModule and statsModule:FindFirstChild("IsCrawling")
+    local value = crawling and crawling.Value
+    return value == true or value == 1
+end
+
 function UI:BuildSaveCapturedCFrame(root)
     return root.CFrame * CFrame.new(0, -4.5, 0) * CFrame.Angles(math.rad(90), 0, 0)
 end
@@ -2175,6 +2182,11 @@ function UI:UpdateBeastMovement()
     local noCooldownRunner = self:GetControl(4, "no_cooldown_runner")
     local jumpSlowdownEnabled = noJumpSlowdown and noJumpSlowdown.value == true
     local runnerCooldownEnabled = noCooldownRunner and noCooldownRunner.value == true
+
+    if self:IsLocalPlayerCrawling() then
+        self:SetLocalWalkSpeed(7)
+        return
+    end
 
     if not jumpSlowdownEnabled and not runnerCooldownEnabled then
         self:SetLocalWalkSpeed(16)
