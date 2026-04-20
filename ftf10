@@ -191,7 +191,6 @@ local UI = {
             {id = "npc_player_esp", type = "toggle", label = "Player ESP", description = "", value = false},
             {id = "npc_beast_esp", type = "toggle", label = "Beast ESP", description = "", value = false},
             {id = "pc_esp", type = "toggle", label = "PC ESP", description = "", value = false},
-            {id = "hack_pc_button", type = "button", label = "Hack PC", description = "", accent = "accent"},
         },
         {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
@@ -2143,6 +2142,8 @@ end)
 
 UI:GetEspControlCache()
 UI:RefreshEspEnabledState()
+UI.hackPcActive = false
+UI.hackPcCurrent = nil
 UI:Render()
 
 RunService.RenderStepped:Connect(function(dt)
