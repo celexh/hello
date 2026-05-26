@@ -115,6 +115,7 @@ local UI = {
     activeTweenId = 0,
     tweenNoclipActive = false,
     tweenNoclipStates = {},
+    tweenGravityActive = false,
     minUpdateDelta = 1 / 60,
     lastFrameTick = 0,
     lastEspUpdateTick = 0,
@@ -1305,6 +1306,37 @@ function UI:SetTweenNoclipEnabled(enabled)
     self.tweenNoclipActive = false
 end
 
+function UI:SetTweenGravityEnabled(enabled)
+    if type(memory_read) ~= "function" or type(memory_write) ~= "function" or not workspace or not workspace.Address then
+        return
+    end
+
+    local worldPtr = memory_read("uintptr_t", workspace.Address + 0x408)
+    if not worldPtr or worldPtr == 0 then
+        return
+    end
+
+    if enabled then
+        if self.tweenGravityActive then
+            return
+        end
+        pcall(function()
+            memory_write("float", worldPtr + 0x210, 0)
+        end)
+        self.tweenGravityActive = true
+        return
+    end
+
+    if not self.tweenGravityActive then
+        return
+    end
+
+    pcall(function()
+        memory_write("float", worldPtr + 0x210, 196.2)
+    end)
+    self.tweenGravityActive = false
+end
+
 function UI:CancelTweenToPositions(reason)
     if self.tweenState and self.tweenState.active then
         TweenDebug(string.format(
@@ -1316,6 +1348,7 @@ function UI:CancelTweenToPositions(reason)
 
     self.activeTweenId = (self.activeTweenId or 0) + 1
     self:SetTweenNoclipEnabled(false)
+    self:SetTweenGravityEnabled(false)
     self.tweenState.active = false
     self.tweenState.stages = nil
     self.tweenState.stageIndex = 0
@@ -1488,6 +1521,7 @@ function UI:TweenToPositions(targetPositions)
     self.tweenState.stageIndex = 0
     self.tweenState.speed = self:GetTweenSpeed() * 0.85
     self:SetTweenNoclipEnabled(true)
+    self:SetTweenGravityEnabled(true)
     self:AdvanceTweenStage()
 end
 
@@ -1518,10 +1552,10 @@ function UI:TweenWithVehicleTo(targetPosition)
             return nil
         end
         if index == 1 then
-            return Vector3.new(liveRootPart.Position.X, -70, liveRootPart.Position.Z)
+            return Vector3.new(liveRootPart.Position.X, -40, liveRootPart.Position.Z)
         end
         if index == 2 then
-            return Vector3.new(targetPosition.X, -70, targetPosition.Z)
+            return Vector3.new(targetPosition.X, -40, targetPosition.Z)
         end
         if index == 3 then
             return Vector3.new(targetPosition.X, targetPosition.Y + 5, targetPosition.Z)
@@ -1529,6 +1563,7 @@ function UI:TweenWithVehicleTo(targetPosition)
         return nil
     end
     self:SetTweenNoclipEnabled(true)
+    self:SetTweenGravityEnabled(true)
     return self:AdvanceTweenStage()
 end
 
@@ -1619,10 +1654,10 @@ function UI:TweenToPlayer(playerName)
             return nil
         end
         if index == 1 then
-            return Vector3.new(liveRootPart.Position.X, -70, liveRootPart.Position.Z)
+            return Vector3.new(liveRootPart.Position.X, -40, liveRootPart.Position.Z)
         end
         if index == 2 then
-            return Vector3.new(targetPosition.X, -70, targetPosition.Z)
+            return Vector3.new(targetPosition.X, -40, targetPosition.Z)
         end
         if index == 3 then
             return Vector3.new(targetPosition.X, targetPosition.Y + 5, targetPosition.Z)
@@ -1630,6 +1665,7 @@ function UI:TweenToPlayer(playerName)
         return nil
     end
     self:SetTweenNoclipEnabled(true)
+    self:SetTweenGravityEnabled(true)
     self:AdvanceTweenStage()
 end
 
