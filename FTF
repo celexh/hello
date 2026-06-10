@@ -79,7 +79,6 @@ local UI = {
     isRunning = true,
     isBooting = true,
     bootReady = false,
-    bootStartedAt = tick(),
     bootDuration = 4 + (math.random() * 2),
     bootPanelScale = 0.4,
     bootVisualProgress = 0,
@@ -87,8 +86,6 @@ local UI = {
     uiVisible = true,
     uiAlpha = 1,
     uiOffset = 0,
-    renderX = nil,
-    renderY = nil,
     renderScale = 1,
     contentAlpha = 1,
     contentOffset = 0,
@@ -169,15 +166,9 @@ local UI = {
     exitDoorColorCache = {},
     currentMapRoot = nil,
     lastComputerMapCheck = 0,
-    lastComputerCacheRefresh = 0,
     computerCacheMap = nil,
     freezePodCacheMap = nil,
     exitDoorCacheMap = nil,
-    computerCacheWarmupStartedAt = 0,
-    computerEspWasEnabled = false,
-    freezePodEspWasEnabled = false,
-    exitDoorEspWasEnabled = false,
-    espControlCache = nil,
     espEnabledState = {
         npcPlayer = false,
         npcBeast = false,
@@ -185,7 +176,6 @@ local UI = {
         fp = false,
         ed = false,
     },
-    maxUpdateFps = 60,
     minUpdateDelta = 1 / 60,
     lastFrameTick = 0,
     confirmPopup = nil,
@@ -243,6 +233,7 @@ local UI = {
         {
             {id = "annoy_beast_front_toggle", type = "toggle", label = "Annoy Beast Front", description = "", value = false},
             {id = "annoy_beast_back_toggle", type = "toggle", label = "Annoy Beast Back", description = "", value = false},
+            {id = "fling_beast_button", type = "button", label = "Fling Beast", description = "", accent = "accent"},
         },
         {
             {id = "ui_scale", type = "slider", label = "UI Width", description = "", min = 540, max = 760, step = 10, value = 620},
@@ -256,24 +247,9 @@ local UI = {
     },
 }
 
-local function LerpNumber(a, b, t)
-    return a + ((b - a) * t)
-end
-
-local function LerpColor(a, b, t)
-    return Color3.new(
-        LerpNumber(a.R, b.R, t),
-        LerpNumber(a.G, b.G, t),
-        LerpNumber(a.B, b.B, t)
-    )
-end
-
 local function SmoothFactor(speed, dt)
     return 1 - math.exp(-(speed or 1) * (dt or (1 / 60)))
 end
-
-local VK_Z = 0x5A
-local VK_Q = 0x51
 
 function UI:Track(bucket, obj)
     if bucket and bucket.deferVisible then
@@ -281,10 +257,6 @@ function UI:Track(bucket, obj)
     end
     table.insert(bucket.objects, obj)
     return obj
-end
-
-function UI:GetRenderTransparency(value)
-    return math.clamp((value or 1) * (self.renderAlpha or 1), 0, 1)
 end
 
 function UI:ClearBucket(bucket)
@@ -319,7 +291,7 @@ function UI:CreateSquare(bucket, x, y, w, h, color, transparency, filled, thickn
     square.Position = Vector2.new(tx, ty)
     square.Size = Vector2.new(tw, th)
     square.Color = color
-    square.Transparency = self:GetRenderTransparency(transparency or 1)
+    square.Transparency = transparency or 1
     square.Filled = filled ~= false
     square.Visible = not (bucket and bucket.deferVisible)
     if not square.Filled then
@@ -362,7 +334,7 @@ function UI:CreateLine(bucket, fromX, fromY, toX, toY, color, transparency, thic
     line.From = Vector2.new(tx1, ty1)
     line.To = Vector2.new(tx2, ty2)
     line.Color = color
-    line.Transparency = self:GetRenderTransparency(transparency or 1)
+    line.Transparency = transparency or 1
     line.Thickness = math.max(1, math.floor((thickness or 1) * (self.renderScale or 1) + 0.5))
     line.Visible = not (bucket and bucket.deferVisible)
     return self:Track(bucket, line)
@@ -374,7 +346,7 @@ function UI:CreateCircle(bucket, x, y, radius, color, transparency, filled, thic
     circle.Position = Vector2.new(tx, ty)
     circle.Radius = math.max(1, radius * (self.renderScale or 1))
     circle.Color = color
-    circle.Transparency = self:GetRenderTransparency(transparency or 1)
+    circle.Transparency = transparency or 1
     circle.Filled = filled ~= false
     circle.Visible = not (bucket and bucket.deferVisible)
     if not circle.Filled then
@@ -426,7 +398,7 @@ function UI:CreateImage(bucket, data, x, y, w, h, transparency)
         image.Position = Vector2.new(tx, ty)
         image.Size = Vector2.new(tw, th)
         image.Visible = not (bucket and bucket.deferVisible)
-        image.Transparency = self:GetRenderTransparency(transparency or 1)
+        image.Transparency = transparency or 1
         image.Data = data
     end)
 
@@ -542,31 +514,14 @@ function UI:CleanupTrackedEspKeys(bucketKey, seen)
     self.activeEspKeys[bucketKey] = tracked
 end
 
-function UI:GetEspControlCache()
-    if self.espControlCache then
-        return self.espControlCache
-    end
-
-    self.espControlCache = {
-        npcPlayer = self:GetControl(2, "npc_player_esp"),
-        npcBeast = self:GetControl(2, "npc_beast_esp"),
-        pc = self:GetControl(2, "pc_esp"),
-        fp = self:GetControl(2, "freeze_pod_esp"),
-        ed = self:GetControl(2, "exit_door_esp"),
-    }
-
-    return self.espControlCache
-end
-
 function UI:RefreshEspEnabledState()
-    local cache = self:GetEspControlCache()
     local state = self.espEnabledState
 
-    state.npcPlayer = cache.npcPlayer and cache.npcPlayer.value == true or false
-    state.npcBeast = cache.npcBeast and cache.npcBeast.value == true or false
-    state.pc = cache.pc and cache.pc.value == true or false
-    state.fp = cache.fp and cache.fp.value == true or false
-    state.ed = cache.ed and cache.ed.value == true or false
+    state.npcPlayer = self:GetControl(2, "npc_player_esp") and self:GetControl(2, "npc_player_esp").value == true or false
+    state.npcBeast = self:GetControl(2, "npc_beast_esp") and self:GetControl(2, "npc_beast_esp").value == true or false
+    state.pc = self:GetControl(2, "pc_esp") and self:GetControl(2, "pc_esp").value == true or false
+    state.fp = self:GetControl(2, "freeze_pod_esp") and self:GetControl(2, "freeze_pod_esp").value == true or false
+    state.ed = self:GetControl(2, "exit_door_esp") and self:GetControl(2, "exit_door_esp").value == true or false
 
     return state
 end
@@ -685,7 +640,6 @@ function UI:RefreshComputerCache(force)
 
     self.computerCache = results
     self.computerCacheMap = mapRoot
-    self.lastComputerCacheRefresh = tick()
     return results
 end
 
@@ -768,18 +722,6 @@ end
 
 function UI:GetExitDoorTargets()
     return self:RefreshExitDoorCache(false)
-end
-
-function UI:GetComputerTableAncestor(instance)
-    local current = instance
-    while current and current ~= workspace do
-        if current.Name == "ComputerTable" and current:IsA("Model") then
-            return current
-        end
-        current = current.Parent
-    end
-
-    return nil
 end
 
 function UI:ShowConfirmPopup(title, onYes, okOnly)
@@ -885,6 +827,199 @@ function UI:GetBeastTargetRoot()
     return nil, nil
 end
 
+function UI:GetFlingOffsets()
+    if self.flingOffsets then
+        return self.flingOffsets
+    end
+
+    if not HttpService then
+        return nil
+    end
+
+    local ok, response = pcall(function()
+        return game:HttpGet("https://imtheo.lol/Offsets/Offsets.json")
+    end)
+    if not ok or not response or response == "" then
+        return nil
+    end
+
+    local decodeOk, decoded = pcall(function()
+        return HttpService:JSONDecode(response)
+    end)
+    if not decodeOk or type(decoded) ~= "table" or type(decoded.Offsets) ~= "table" then
+        return nil
+    end
+
+    self.flingOffsets = decoded.Offsets
+    return self.flingOffsets
+end
+
+function UI:GetPrimitivePointerOffset(part, primitivePositionOffset)
+    if not part or not part.Address or type(memory_read) ~= "function" or type(primitivePositionOffset) ~= "number" then
+        return nil
+    end
+
+    for offset = 8, 1024, 8 do
+        local readPtrSuccess, ptrAddress = pcall(memory_read, "uintptr_t", part.Address + offset)
+        if readPtrSuccess and ptrAddress and ptrAddress > 10000 then
+            local readPosSuccess, memPosX = pcall(memory_read, "float", ptrAddress + primitivePositionOffset)
+            if readPosSuccess and type(memPosX) == "number" and math.abs(memPosX - part.Position.X) < 0.1 then
+                return offset
+            end
+        end
+    end
+
+    return nil
+end
+
+function UI:StopFlingBeast()
+    if self.flingBeastConnection then
+        self.flingBeastConnection:Disconnect()
+        self.flingBeastConnection = nil
+    end
+
+    local state = self.flingBeastState
+    if not state then
+        return
+    end
+
+    if state.humanoid and state.humanoid.Parent and state.autoRotateOffset and state.originalAutoRotate ~= nil then
+        pcall(memory_write, "byte", state.humanoid.Address + state.autoRotateOffset, state.originalAutoRotate)
+    end
+
+    if state.localRoot and state.localRoot.Parent then
+        pcall(function()
+            state.localRoot.Velocity = Vector3.new(0, 0, 0)
+        end)
+        pcall(function()
+            state.localRoot.RotVelocity = Vector3.new(0, 0, 0)
+        end)
+        if state.originalCFrame then
+            state.localRoot.CFrame = state.originalCFrame
+        end
+    end
+
+    if state.primitiveAddress and state.angVelOffset then
+        local targetX = state.primitiveAddress + state.angVelOffset
+        local targetY = targetX + 4
+        local targetZ = targetX + 8
+        pcall(memory_write, "float", targetX, 0)
+        pcall(memory_write, "float", targetY, 0)
+        pcall(memory_write, "float", targetZ, 0)
+    end
+
+    if type(state.collisions) == "table" then
+        for part, canCollide in pairs(state.collisions) do
+            if part and part.Parent then
+                part.CanCollide = canCollide == true
+            end
+        end
+    end
+
+    self.flingBeastState = nil
+end
+
+function UI:FlingBeast()
+    self:StopFlingBeast()
+
+    local beastModel, beastRoot = self:GetBeastTargetRoot()
+    local character = LocalPlayer and LocalPlayer.Character
+    local localRoot = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if not beastModel or not beastRoot then
+        self:NotifyPlayer("Beast not found", "Windy", 3)
+        return
+    end
+
+    if not character or not localRoot or not humanoid or not localRoot.Address or not humanoid.Address then
+        self:NotifyPlayer("Local character not ready", "Windy", 3)
+        return
+    end
+
+    local offsets = self:GetFlingOffsets()
+    local primitiveOffsets = offsets and offsets.Primitive
+    local humanoidOffsets = offsets and offsets.Humanoid
+    if type(primitiveOffsets) ~= "table" or type(humanoidOffsets) ~= "table" then
+        self:NotifyPlayer("Offsets unavailable", "Windy", 3)
+        return
+    end
+
+    local primitiveOffset = self:GetPrimitivePointerOffset(localRoot, primitiveOffsets.Position)
+    if not primitiveOffset then
+        self:NotifyPlayer("Primitive offset not found", "Windy", 3)
+        return
+    end
+    if type(primitiveOffsets.AssemblyAngularVelocity) ~= "number" or type(humanoidOffsets.AutoRotate) ~= "number" then
+        self:NotifyPlayer("Required offsets unavailable", "Windy", 3)
+        return
+    end
+
+    local collisions = {}
+    for _, part in ipairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            collisions[part] = part.CanCollide == true
+            part.CanCollide = false
+        end
+    end
+
+    local originalAutoRotate = nil
+    pcall(function()
+        originalAutoRotate = memory_read("byte", humanoid.Address + humanoidOffsets.AutoRotate)
+    end)
+    pcall(memory_write, "byte", humanoid.Address + humanoidOffsets.AutoRotate, 0)
+
+    local current = localRoot.CFrame
+    local beastPosition = beastRoot.Position
+    localRoot.CFrame = CFrame.new(beastPosition.X, beastPosition.Y, beastPosition.Z) * (current - current.Position)
+
+    local startedAt = tick()
+    local flingSpeed = 120000
+    local angVelOffset = primitiveOffsets.AssemblyAngularVelocity
+    local primitiveAddress = nil
+
+    self.flingBeastState = {
+        localRoot = localRoot,
+        humanoid = humanoid,
+        originalCFrame = current,
+        originalAutoRotate = originalAutoRotate,
+        autoRotateOffset = humanoidOffsets.AutoRotate,
+        collisions = collisions,
+        primitiveAddress = nil,
+        angVelOffset = angVelOffset,
+    }
+
+    self.flingBeastConnection = RunService.Stepped:Connect(function()
+        if humanoid.Health <= 0 or not character:IsDescendantOf(workspace) or not beastRoot.Parent or (tick() - startedAt) >= 2 then
+            self:StopFlingBeast()
+            return
+        end
+
+        local liveCurrent = localRoot.CFrame
+        local liveBeastPosition = beastRoot.Position
+        localRoot.CFrame = CFrame.new(liveBeastPosition.X, liveBeastPosition.Y, liveBeastPosition.Z) * (liveCurrent - liveCurrent.Position)
+
+        local readOk, livePrimitiveAddress = pcall(memory_read, "uintptr_t", localRoot.Address + primitiveOffset)
+        if not readOk or not livePrimitiveAddress or livePrimitiveAddress <= 10000 then
+            return
+        end
+        primitiveAddress = livePrimitiveAddress
+        if self.flingBeastState then
+            self.flingBeastState.primitiveAddress = primitiveAddress
+        end
+
+        local targetX = primitiveAddress + angVelOffset
+        local targetY = targetX + 4
+        local targetZ = targetX + 8
+
+        for _ = 1, 2000 do
+            memory_write("float", targetX, 0)
+            memory_write("float", targetY, flingSpeed)
+            memory_write("float", targetZ, 0)
+        end
+    end)
+end
+
 function UI:GetAnnoyBeastFrontPosition(beastRoot)
     if not beastRoot then
         return nil
@@ -907,6 +1042,49 @@ function UI:GetAntiCapturePosition(beastRoot)
     end
 
     return beastRoot.Position - (beastRoot.CFrame.LookVector * 30)
+end
+
+function UI:ApplyVelocityHold(rootPart)
+    if not rootPart then
+        return
+    end
+
+    pcall(function()
+        rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        rootPart.Velocity = Vector3.new(0, 0, 0)
+    end)
+    pcall(function()
+        rootPart.RotVelocity = Vector3.new(0, 0, 0)
+    end)
+end
+
+function UI:MoveRootWithAnimationPreserve(rootPart, targetPosition)
+    if not rootPart or not targetPosition then
+        return
+    end
+
+    local startCF = rootPart.CFrame
+    local targetCF = CFrame.new(targetPosition.X, targetPosition.Y, targetPosition.Z)
+    local tweenSpeed = math.max(self:GetTweenSpeed() or 80, 40)
+    local distance = (targetPosition - rootPart.Position).Magnitude
+    local duration = math.clamp(distance / tweenSpeed, 0.05, 0.12)
+    local startedAt = os.clock()
+
+    while true do
+        local alpha = math.clamp((os.clock() - startedAt) / duration, 0, 1)
+        self:ApplyVelocityHold(rootPart)
+        rootPart.CFrame = startCF:Lerp(targetCF, alpha)
+        self:ApplyVelocityHold(rootPart)
+        if alpha >= 1 then
+            break
+        end
+        task.wait()
+    end
+
+    rootPart.CFrame = targetCF
+    self:ApplyVelocityHold(rootPart)
 end
 
 function UI:StartAntiCapture()
@@ -1079,8 +1257,6 @@ function UI:StopSaveCaptured()
     end
 end
 
-
-
 function UI:StartAutoDo()
     self:StopAutoDo()
     local eKey = 0x45
@@ -1098,7 +1274,7 @@ function UI:StartAutoDo()
                 local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
 
                 if timingCircle and timingPin and timingBase then
-                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
+                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5ad)
                     if ok and circleVisible == 1 then
                         local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
                         local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
@@ -1241,16 +1417,9 @@ function UI:UpdateComputerEsp()
     local hideHacked = hideHackedControl and hideHackedControl.value == true
     local hideErrored = hideErroredControl and hideErroredControl.value == true
 
-    if pcEspEnabled and not self.computerEspWasEnabled then
+    if not pcEspEnabled then
         self.computerCache = {}
         self.computerCacheMap = nil
-        self.lastComputerCacheRefresh = 0
-        self.computerCacheWarmupStartedAt = tick()
-    end
-
-    self.computerEspWasEnabled = pcEspEnabled
-
-    if not pcEspEnabled then
         for key, _ in pairs(self.activeEspKeys.pc or {}) do
             local entry = self.espObjects[key]
             if entry then
@@ -1351,12 +1520,9 @@ function UI:UpdateFreezePodEsp()
     local state = self.espEnabledState or self:RefreshEspEnabledState()
     local enabled = state.fp == true
 
-    if enabled and not self.freezePodEspWasEnabled then
+    if not enabled then
         self.freezePodCache = {}
         self.freezePodCacheMap = nil
-    end
-
-    if not enabled then
         for key, _ in pairs(self.activeEspKeys.fp or {}) do
             local entry = self.espObjects[key]
             if entry then
@@ -1364,7 +1530,6 @@ function UI:UpdateFreezePodEsp()
             end
         end
         self.activeEspKeys.fp = {}
-        self.freezePodEspWasEnabled = false
         return
     end
 
@@ -1410,20 +1575,16 @@ function UI:UpdateFreezePodEsp()
 
     self:CleanupTrackedEspKeys("fp", seen)
 
-    self.freezePodEspWasEnabled = true
 end
 
 function UI:UpdateExitDoorEsp()
     local state = self.espEnabledState or self:RefreshEspEnabledState()
     local enabled = state.ed == true
 
-    if enabled and not self.exitDoorEspWasEnabled then
+    if not enabled then
         self.exitDoorCache = {}
         self.exitDoorColorCache = {}
         self.exitDoorCacheMap = nil
-    end
-
-    if not enabled then
         for key, _ in pairs(self.activeEspKeys.ed or {}) do
             local entry = self.espObjects[key]
             if entry then
@@ -1431,7 +1592,6 @@ function UI:UpdateExitDoorEsp()
             end
         end
         self.activeEspKeys.ed = {}
-        self.exitDoorEspWasEnabled = false
         return
     end
 
@@ -1477,7 +1637,6 @@ function UI:UpdateExitDoorEsp()
 
     self:CleanupTrackedEspKeys("ed", seen)
 
-    self.exitDoorEspWasEnabled = true
 end
 
 function UI:CreateRoundedBox(bucket, x, y, w, h, radius, color)
@@ -1501,7 +1660,7 @@ function UI:AnimateValue(store, key, target, speed, dt, defaultValue)
         current = defaultValue ~= nil and defaultValue or target
     end
 
-    local nextValue = LerpNumber(current, target, SmoothFactor(speed or 12, dt))
+    local nextValue = current + (target - current) * SmoothFactor(speed or 12, dt)
     if math.abs(nextValue - target) < 0.001 then
         nextValue = target
     end
@@ -1524,7 +1683,7 @@ function UI:GetViewportSize()
 end
 
 function UI:GetRenderWindowPosition()
-    return math.floor((self.renderX or self.window.x) + 0.5), math.floor((self.renderY or self.window.y) + 0.5)
+    return math.floor(self.window.x + 0.5), math.floor(self.window.y + 0.5)
 end
 
 function UI:GetTransformCenter()
@@ -1564,8 +1723,6 @@ function UI:UpdateAnimations(dt)
     if not self:AreAnimationsEnabled() then
         self.uiAlpha = self.uiVisible and 1 or 0
         self.uiOffset = 0
-        self.renderX = self.window.x
-        self.renderY = self.window.y
         self.renderScale = 1
         self.contentAlpha = self.uiVisible and 1 or 0
         self.contentOffset = 0
@@ -1593,7 +1750,7 @@ function UI:UpdateAnimations(dt)
 
     local animating = false
     local alphaTarget = self.uiVisible and 1 or 0
-    self.uiAlpha = LerpNumber(self.uiAlpha or alphaTarget, alphaTarget, SmoothFactor(16, dt))
+    self.uiAlpha = (self.uiAlpha or alphaTarget) + (alphaTarget - (self.uiAlpha or alphaTarget)) * SmoothFactor(16, dt)
     if math.abs(self.uiAlpha - alphaTarget) < 0.001 then
         self.uiAlpha = alphaTarget
     else
@@ -1601,18 +1758,15 @@ function UI:UpdateAnimations(dt)
     end
 
     local offsetTarget = self.uiVisible and 0 or 10
-    self.uiOffset = LerpNumber(self.uiOffset or offsetTarget, offsetTarget, SmoothFactor(16, dt))
+    self.uiOffset = (self.uiOffset or offsetTarget) + (offsetTarget - (self.uiOffset or offsetTarget)) * SmoothFactor(16, dt)
     if math.abs(self.uiOffset - offsetTarget) >= 0.01 then
         animating = true
     else
         self.uiOffset = offsetTarget
     end
 
-    self.renderX = self.window.x
-    self.renderY = self.window.y
-
     local scaleTarget = self.uiVisible and 1 or 0.2
-    self.renderScale = LerpNumber(self.renderScale or scaleTarget, scaleTarget, SmoothFactor(16, dt))
+    self.renderScale = (self.renderScale or scaleTarget) + (scaleTarget - (self.renderScale or scaleTarget)) * SmoothFactor(16, dt)
     if math.abs((self.renderScale or scaleTarget) - scaleTarget) >= 0.001 then
         animating = true
     else
@@ -1620,8 +1774,8 @@ function UI:UpdateAnimations(dt)
     end
 
     local contentTarget = self.uiVisible and 1 or 0
-    self.contentAlpha = LerpNumber(self.contentAlpha or contentTarget, contentTarget, SmoothFactor(14, dt))
-    self.contentOffset = LerpNumber(self.contentOffset or 0, self.uiVisible and 0 or 4, SmoothFactor(14, dt))
+    self.contentAlpha = (self.contentAlpha or contentTarget) + (contentTarget - (self.contentAlpha or contentTarget)) * SmoothFactor(14, dt)
+    self.contentOffset = (self.contentOffset or 0) + ((self.uiVisible and 0 or 4) - (self.contentOffset or 0)) * SmoothFactor(14, dt)
     if math.abs(self.contentAlpha - contentTarget) >= 0.001 or math.abs(self.contentOffset - (self.uiVisible and 0 or 4)) >= 0.01 then
         animating = true
     else
@@ -1633,7 +1787,7 @@ function UI:UpdateAnimations(dt)
     if self.draggingWindow then
         self.activeTabHighlightY = activeTabTargetY
     else
-        self.activeTabHighlightY = LerpNumber(self.activeTabHighlightY or activeTabTargetY, activeTabTargetY, SmoothFactor(18, dt))
+        self.activeTabHighlightY = (self.activeTabHighlightY or activeTabTargetY) + (activeTabTargetY - (self.activeTabHighlightY or activeTabTargetY)) * SmoothFactor(18, dt)
     end
     if math.abs((self.activeTabHighlightY or activeTabTargetY) - activeTabTargetY) >= 0.01 then
         animating = true
@@ -1672,7 +1826,7 @@ function UI:UpdateAnimations(dt)
     end
 
     local _, _, _, _, thumbTargetY = self:GetScrollbarMetrics()
-    self.animatedScrollThumbY = LerpNumber(self.animatedScrollThumbY or thumbTargetY, thumbTargetY, SmoothFactor(16, dt))
+    self.animatedScrollThumbY = (self.animatedScrollThumbY or thumbTargetY) + (thumbTargetY - (self.animatedScrollThumbY or thumbTargetY)) * SmoothFactor(16, dt)
     if math.abs((self.animatedScrollThumbY or thumbTargetY) - thumbTargetY) >= 0.01 then
         animating = true
     else
@@ -1775,9 +1929,6 @@ function UI:GetControl(tabIndex, controlId)
     return nil
 end
 
-error("Matcha:2751: attempt to index nil with 'NotifyPlayer'")
--- hahahhhahahaahhaahhahahaahahahhaahhahaahh noob
-
 function UI:SetStatValue(controlId, value)
     local control = self:GetControl(1, controlId)
     local nextValue = tostring(value or "")
@@ -1826,11 +1977,7 @@ function UI:RefreshStatsTab(force)
         return string.lower(a) < string.lower(b)
     end)
 
-    local optionsSignature = table.concat(playerNames, "\0")
-    if optionsSignature ~= (self.statsPlayerOptionsSignature or "") then
-        dropdown.options = playerNames
-        self.statsPlayerOptionsSignature = optionsSignature
-    end
+    dropdown.options = playerNames
 
     local selectedName = tostring(dropdown.value or "")
     local selectionValid = false
@@ -1861,7 +2008,6 @@ function UI:RefreshStatsTab(force)
     end
 
     local builtControls = {dropdown}
-    local signatureParts = {selectedName, optionsSignature}
     local statsModule = selectedPlayer and selectedPlayer:FindFirstChild("SavedPlayerStatsModule") or nil
 
     if statsModule then
@@ -1878,7 +2024,6 @@ function UI:RefreshStatsTab(force)
                 label = child.Name,
                 value = statValue,
             })
-            table.insert(signatureParts, child.Name .. "=" .. statValue)
         end
     else
         local fallbackValue = selectedPlayer and "No SavedPlayerStatsModule" or "No player selected"
@@ -1888,17 +2033,10 @@ function UI:RefreshStatsTab(force)
             label = "Status",
             value = fallbackValue,
         })
-        table.insert(signatureParts, "Status=" .. fallbackValue)
     end
 
-    local nextSignature = table.concat(signatureParts, "\n")
-    if nextSignature ~= (self.statsTabSignature or "") then
-        self.statsTabControls = builtControls
-        self.statsTabSignature = nextSignature
-        self:MarkTabDirty(5)
-    else
-        self.statsTabControls = builtControls
-    end
+    self.statsTabControls = builtControls
+    self:MarkTabDirty(5)
 end
 
 function UI:FormatDuration(seconds)
@@ -2178,6 +2316,7 @@ function UI:SetLocalWalkSpeed(speed)
 end
 
 function UI:UpdateBeastMovement()
+    local VK_Q = 0x51
     local noJumpSlowdown = self:GetControl(4, "no_jump_slowdown")
     local noCooldownRunner = self:GetControl(4, "no_cooldown_runner")
     local jumpSlowdownEnabled = noJumpSlowdown and noJumpSlowdown.value == true
@@ -2370,11 +2509,11 @@ function UI:DrawToggle(bucket, control, x, y, w, h)
     local radius = math.max(3, math.floor(boxSize / 4))
 
     if fill <= 0.01 then
-        self:CreateSquare(bucket, x, y, boxSize, boxSize, LerpColor(Theme.panelAlt, Theme.accentSoft, fill), 1, true)
-        self:CreateSquare(bucket, x, y, boxSize, boxSize, LerpColor(Theme.border, Theme.accent, fill), 1, false, 1)
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, Color3.new(Theme.panelAlt.R + (Theme.accentSoft.R - Theme.panelAlt.R) * fill, Theme.panelAlt.G + (Theme.accentSoft.G - Theme.panelAlt.G) * fill, Theme.panelAlt.B + (Theme.accentSoft.B - Theme.panelAlt.B) * fill), 1, true)
+        self:CreateSquare(bucket, x, y, boxSize, boxSize, Color3.new(Theme.border.R + (Theme.accent.R - Theme.border.R) * fill, Theme.border.G + (Theme.accent.G - Theme.border.G) * fill, Theme.border.B + (Theme.accent.B - Theme.border.B) * fill), 1, false, 1)
     else
-        local borderColor = LerpColor(Theme.border, Theme.accent, fill)
-        local fillColor = LerpColor(Theme.panelAlt, Theme.accent, fill)
+        local borderColor = Color3.new(Theme.border.R + (Theme.accent.R - Theme.border.R) * fill, Theme.border.G + (Theme.accent.G - Theme.border.G) * fill, Theme.border.B + (Theme.accent.B - Theme.border.B) * fill)
+        local fillColor = Color3.new(Theme.panelAlt.R + (Theme.accent.R - Theme.panelAlt.R) * fill, Theme.panelAlt.G + (Theme.accent.G - Theme.panelAlt.G) * fill, Theme.panelAlt.B + (Theme.accent.B - Theme.panelAlt.B) * fill)
         self:CreateRoundedBox(bucket, x, y, boxSize, boxSize, radius, borderColor)
         self:CreateRoundedBox(bucket, x + 1, y + 1, boxSize - 2, boxSize - 2, math.max(2, radius - 1), fillColor)
     end
@@ -2382,8 +2521,8 @@ end
 
 function UI:DrawCheckbox(bucket, control, x, y, w, h)
     local fill = self.animationState.checkboxFill[control.id] or (control.value and 1 or 0)
-    self:CreateSquare(bucket, x, y, w, h, LerpColor(Theme.panelAlt, Theme.accentSoft, fill), 1, true)
-    self:CreateSquare(bucket, x, y, w, h, LerpColor(Theme.border, Theme.accent, fill), 1, false, 1)
+    self:CreateSquare(bucket, x, y, w, h, Color3.new(Theme.panelAlt.R + (Theme.accentSoft.R - Theme.panelAlt.R) * fill, Theme.panelAlt.G + (Theme.accentSoft.G - Theme.panelAlt.G) * fill, Theme.panelAlt.B + (Theme.accentSoft.B - Theme.panelAlt.B) * fill), 1, true)
+    self:CreateSquare(bucket, x, y, w, h, Color3.new(Theme.border.R + (Theme.accent.R - Theme.border.R) * fill, Theme.border.G + (Theme.accent.G - Theme.border.G) * fill, Theme.border.B + (Theme.accent.B - Theme.border.B) * fill), 1, false, 1)
     if fill > 0.01 then
         local inset = 4 + math.floor((1 - fill) * 2)
         self:CreateSquare(bucket, x + inset, y + inset, math.max(2, w - (inset * 2)), math.max(2, h - (inset * 2)), Theme.accent, fill, true)
@@ -2483,6 +2622,8 @@ function UI:HandleControlClick(control)
                 pcall(setclipboard, "https://discord.gg/Hu7BQwkJ3y")
             end
             self:NotifyPlayer("Discord link copied to clipboard", "Windy", 3)
+        elseif control.id == "fling_beast_button" then
+            self:FlingBeast()
         elseif control.id == "force_unfreeze_button" then
             self:ShowConfirmPopup("You Wont Be Able To Interact With Anything", function()
                 self:ExecuteForceUnfreezeAction()
@@ -2526,6 +2667,7 @@ function UI:HandleDropdownOption(control, option)
 end
 
 function UI:HandleHotkeys()
+    local VK_Z = 0x5A
     if type(iskeypressed) ~= "function" then
         return
     end
@@ -2671,7 +2813,7 @@ function UI:BuildShell()
         local buttonW = sidebarW - 28
         local buttonH = 27
 
-        self:CreateSquare(bucket, buttonX, buttonY, buttonW, buttonH, LerpColor(Theme.shell, Theme.panel, hoverAmount), 1 - (selectedAmount * 0.95), true)
+        self:CreateSquare(bucket, buttonX, buttonY, buttonW, buttonH, Color3.new(Theme.shell.R + (Theme.panel.R - Theme.shell.R) * hoverAmount, Theme.shell.G + (Theme.panel.G - Theme.shell.G) * hoverAmount, Theme.shell.B + (Theme.panel.B - Theme.shell.B) * hoverAmount), 1 - (selectedAmount * 0.95), true)
         if hoverAmount > 0.01 and selectedAmount < 0.99 then
             self:CreateSquare(bucket, buttonX + 1, buttonY + 1, buttonW - 2, buttonH - 2, Theme.topHighlight, 0.04 * hoverAmount, true)
         end
@@ -2681,7 +2823,11 @@ function UI:BuildShell()
             tab.name,
             wx + 24,
             buttonY + 7,
-            LerpColor(LerpColor(Theme.textDim, Theme.text, hoverAmount), Theme.success, selectedAmount),
+            Color3.new(
+                (Theme.textDim.R + (Theme.text.R - Theme.textDim.R) * hoverAmount) + (Theme.success.R - (Theme.textDim.R + (Theme.text.R - Theme.textDim.R) * hoverAmount)) * selectedAmount,
+                (Theme.textDim.G + (Theme.text.G - Theme.textDim.G) * hoverAmount) + (Theme.success.G - (Theme.textDim.G + (Theme.text.G - Theme.textDim.G) * hoverAmount)) * selectedAmount,
+                (Theme.textDim.B + (Theme.text.B - Theme.textDim.B) * hoverAmount) + (Theme.success.B - (Theme.textDim.B + (Theme.text.B - Theme.textDim.B) * hoverAmount)) * selectedAmount
+            ),
             13,
             false
         )
@@ -2939,7 +3085,7 @@ function UI:BuildActiveTab()
                 self:CreateLine(bucket, cardX + 120, drawY + 10, cardX + cardW - 8, drawY + 10, Theme.borderSoft, 0.8, 1)
             else
                 local hovered = self.animationState.controlHover[control.id] or 0
-                self:DrawCardFrame(bucket, controlCardX, drawY, controlCardW, baseCardHeight, LerpColor(Theme.border, Theme.topHighlight, hovered))
+                self:DrawCardFrame(bucket, controlCardX, drawY, controlCardW, baseCardHeight, Color3.new(Theme.border.R + (Theme.topHighlight.R - Theme.border.R) * hovered, Theme.border.G + (Theme.topHighlight.G - Theme.border.G) * hovered, Theme.border.B + (Theme.topHighlight.B - Theme.border.B) * hovered))
                 self:CreateText(bucket, control.label, controlCardX + 16, drawY + (isPcFilterChild and 11 or 16), Theme.text, isPcFilterChild and 12 or 13, false)
 
                 if control.type == "toggle" then
@@ -3087,7 +3233,6 @@ end)
 
 UI:RefreshHomeStats(true)
 UI:RefreshStatsTab(true)
-UI:GetEspControlCache()
 UI:RefreshEspEnabledState()
 if UI:GetControl(3, "auto_do_toggle") and UI:GetControl(3, "auto_do_toggle").value then
     UI:StartAutoDo()
@@ -3133,11 +3278,11 @@ RunService.RenderStepped:Connect(function(dt)
             UI:GetLogoImageData()
         end)
 
-        local elapsed = tick() - UI.bootStartedAt
+        local elapsed = tick() - UI.launchTick
         local duration = math.max(0.01, UI.bootDuration)
         local timeProgress = math.clamp(elapsed / duration, 0, 1)
         local minProgress = math.min(0.985, timeProgress * 0.9)
-        UI.bootPanelScale = LerpNumber(UI.bootPanelScale or 0.4, 1, SmoothFactor(10, dt or (1 / 60)))
+        UI.bootPanelScale = (UI.bootPanelScale or 0.4) + (1 - (UI.bootPanelScale or 0.4)) * SmoothFactor(10, dt or (1 / 60))
         if math.abs((UI.bootPanelScale or 1) - 1) < 0.001 then
             UI.bootPanelScale = 1
         end
@@ -3149,14 +3294,14 @@ RunService.RenderStepped:Connect(function(dt)
 
         UI.bootVisualProgress = math.max(
             minProgress,
-            LerpNumber(UI.bootVisualProgress or 0, UI.bootVisualTarget or minProgress, SmoothFactor(2.2 + (math.random() * 0.8), dt or (1 / 60)))
+            (UI.bootVisualProgress or 0) + ((UI.bootVisualTarget or minProgress) - (UI.bootVisualProgress or 0)) * SmoothFactor(2.2 + (math.random() * 0.8), dt or (1 / 60))
         )
 
         if timeProgress >= 1 then
             UI.bootVisualProgress = 1
         end
 
-        if (tick() - UI.bootStartedAt) >= UI.bootDuration
+        if (tick() - UI.launchTick) >= UI.bootDuration
             and (UI.bootVisualProgress or 0) >= 0.999
             and UI:IsLogoImageReady()
         then
