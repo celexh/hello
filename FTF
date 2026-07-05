@@ -247,7 +247,7 @@ local UI = {
     configFolderName = "FtfObsidian",
     configFileName = "config.json",
     title = "mswindy",
-    footerText = "version: ftf",
+    footerText = "version: sit fix",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -399,12 +399,12 @@ local UI = {
             {id = "auto_do_toggle", type = "toggle", label = "Auto PC Puzzle", value = false, group = "Automation", side = 1},
             {id = "anti_capture_toggle", type = "toggle", label = "Anti-Capture", value = false, group = "Automation", side = 1},
             {id = "save_captured_toggle", type = "toggle", label = "Save Captured", value = false, group = "Automation", side = 1},
-            {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", group = "Actions", side = 2},
+            {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", group = "Actions", side = 2, disabled = true},
         },
         {
             {id = "no_jump_slowdown", type = "toggle", label = "No Jump Slowdown", value = false, group = "Movement", side = 1},
             {id = "no_cooldown_runner", type = "toggle", label = "No Cooldown Runner Only", value = false, group = "Movement", side = 1},
-            {id = "end_round_button", type = "button", label = "End Round", group = "Round", side = 2},
+            {id = "end_round_button", type = "button", label = "End Round", group = "Round", side = 2, disabled = true},
         },
         {
             {id = "stats_player_select", type = "dropdown_single", label = "Player", value = "", options = {}, group = "Players", side = 1},
@@ -3295,7 +3295,7 @@ function UI:StartAutoDo()
                 local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
 
                 if timingCircle and timingPin and timingBase then
-                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5ad)
+                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
                     if ok and circleVisible == 1 then
                         local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
                         local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
@@ -3665,8 +3665,8 @@ function UI:SetLocalWalkSpeed(speed)
         return
     end
 
-    pcall(memory_write, "float", hum.Address + 0x1dc, speed)
-    pcall(memory_write, "float", hum.Address + 0x3c4, speed)
+    pcall(memory_write, "float", hum.Address + 0x1d0, speed)
+    pcall(memory_write, "float", hum.Address + 0x3bc, speed)
     self.lastAppliedWalkSpeed = speed
 end
 
