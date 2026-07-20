@@ -1,4 +1,4 @@
-local version = "Baddies Obsidian"
+local version = "Hybrid Release"
 -- Obsidian Drawing UI base
 if not math.clamp then
     math.clamp = function(val, min, max)
@@ -247,7 +247,6 @@ local UI = {
     combatEquipAttemptInterval = 0.2,
     combatEquipNextSlot = 1,
     combatEquipPending = false,
-    flameDebugLast = {},
     interactKeyHeldByCombat = false,
     sessionStartedAt = tick(),
     sessionMoneyMade = 0,
@@ -285,8 +284,8 @@ local UI = {
     aiMessages = {},
     configFolderName = "WindyBaddies",
     configFileName = "config.json",
-    title = "baddies",
-    footerText = "version: obsidian",
+    title = "mswindy",
+    footerText = "version: Hybrid Release",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -2488,19 +2487,11 @@ function UI:ClearAIChat()
 end
 
 function UI:DebugAI(event, ...)
-    if not self.aiDebug then
-        return
-    end
-
-    print("MatchaMind", tostring(event), ...)
+    return
 end
 
 function UI:DebugAIVerbose(event, ...)
-    if not self.aiDebug or not self.aiDebugVerbose then
-        return
-    end
-
-    print("MatchaMind", tostring(event), ...)
+    return
 end
 
 function UI:SetAIStage(stage)
@@ -2957,7 +2948,7 @@ function UI:BuildAIUIContext()
 
     local selectedTab = tonumber(self.selectedTab) or 1
     return {
-        title = compactString(self.title or "Obsidian Base", 80),
+        title = compactString(self.title or "mswindy", 80),
         selectedTab = selectedTab,
         selectedTabName = getTabName(selectedTab),
         tabs = tabs,
@@ -2999,7 +2990,7 @@ function UI:BuildAIChatPayload(userMessage)
         },
 
         client = {
-            ui = "ObsidianBase",
+            ui = "mswindy",
             tab = "MatchaMind",
         },
     })
@@ -3186,9 +3177,6 @@ end
 function UI:PostAIBackend(url, userMessage)
     local username = LocalPlayer and LocalPlayer.Name or "Unknown"
 
-    if self.aiDebug then
-        print("[MatchaMind Request]", username, userMessage)
-    end
     self:SetAIStage("post start")
     self:DebugAI("post start", "url", tostring(url), "messageChars", tostring(#tostring(userMessage or "")), "history", tostring(#(self.aiMessages or {})))
 
@@ -3846,36 +3834,36 @@ end
 
 
 UI:AddAction("example_button", function(control)
-    UI:NotifyPlayer("Example button pressed", "Obsidian Base", 2)
+    UI:NotifyPlayer("Example button pressed", "mswindy", 2)
 end)
 
 UI:AddAction("example_toggle", function(control, value)
-    print("Toggle changed:", UI:GetControlId(control), value)
+    return
 end)
 
 UI:AddAction("example_checkbox", function(control, value)
-    print("Checkbox changed:", UI:GetControlId(control), value)
+    return
 end)
 
 UI:AddAction("example_slider", function(control, value)
-    print("Slider changed:", value)
+    return
 end)
 
 UI:AddAction("example_dropdown", function(control, value)
-    print("Dropdown selected:", value)
+    return
 end)
 
 UI:AddAction("example_multi_dropdown", function(control, option, enabled, selectedTable)
-    print("Multi dropdown:", option, enabled)
+    return
 end)
 
 UI:AddAction("discord_button", function()
-    UI:NotifyPlayer("Discord button placeholder", "Obsidian Base", 2)
+    UI:NotifyPlayer("Discord button placeholder", "mswindy", 2)
 end)
 
 function UI:NotifyPlayer(message, title, duration)
     if type(notify) == "function" then
-        pcall(notify, tostring(message or ""), tostring(title or "Obsidian Base"), tonumber(duration) or 3)
+        pcall(notify, tostring(message or ""), tostring(title or "mswindy"), tonumber(duration) or 3)
     end
 end
 
@@ -5768,7 +5756,7 @@ function UI:DrawObsidianHeader(bucket, wx, wy, ww, wh, sidebarW)
         titleX = iconX + 40
     end
 
-    self:CreateText(bucket, self.title or "obsidian base", titleX, wy + 15, Theme.text, 16, false)
+    self:CreateText(bucket, self.title or "mswindy", titleX, wy + 15, Theme.text, 16, false)
 
     -- search box, full width to right edge
     local searchX = wx + sidebarW + 12
@@ -6094,7 +6082,7 @@ function UI:BuildLoadingScreen()
         self:CreateText(bucket, "m", iconX + 15, iconY + 6, Theme.text, 16, true)
     end
 
-    self:CreateText(bucket, self.title or "obsidian base", contentX + 48, contentY + 14, Theme.text, 20, false)
+    self:CreateText(bucket, self.title or "mswindy", contentX + 48, contentY + 14, Theme.text, 20, false)
 
     -- Divider only across the content container, like Obsidian's Container line
     self:CreateLine(bucket, contentX + 1, contentY + topBarH, contentX + contentW - 1, contentY + topBarH, Theme.border, 1, 1)
@@ -6245,32 +6233,7 @@ function UI:Render()
 end
 
 function UI:DebugPerfReport(force)
-    if not self.debugPerf then
-        return
-    end
-
-    local now = tick()
-    if not force and (now - (self.lastPerfDebugTick or 0)) < 10 then
-        return
-    end
-
-    self.lastPerfDebugTick = now
-
-    local tabCounts = {}
-    for index, bucket in ipairs(self.tabBuckets or {}) do
-        tabCounts[index] = tostring(#(bucket.objects or {}))
-    end
-
-    print(
-        "[ObsidianPerf]",
-        "shell=" .. tostring(#(self.shellBucket.objects or {})),
-        "loading=" .. tostring(#(self.loadingBucket.objects or {})),
-        "tabs=" .. table.concat(tabCounts, ","),
-        "redraws=" .. tostring(self.redrawCount or 0),
-        "shellRebuilds=" .. tostring(self.shellRebuilds or 0),
-        "tabRebuilds=" .. tostring(self.tabRebuilds or 0),
-        "needsRedraw=" .. tostring(self.needsRedraw)
-    )
+    return
 end
 
 function UI:DebugLog(message)
@@ -6310,7 +6273,6 @@ function UI:SetCharacterNoclip(enabled)
 
     local character = LocalPlayer and LocalPlayer.Character
     if not character then
-        warn("No HumanoidRoot")
         return
     end
 
@@ -6816,22 +6778,6 @@ function UI:GetSelectedKillItem()
     return "1 punches"
 end
 
-function UI:DebugFlame(key, message, isError, interval)
-    local now = tick()
-    local last = self.flameDebugLast[key]
-    if last and (now - last) < (interval or 1) then
-        return
-    end
-
-    self.flameDebugLast[key] = now
-    local output = "[Baddies FLAME][" .. tostring(key) .. "] " .. tostring(message)
-    if isError then
-        warn(output)
-    else
-        print(output)
-    end
-end
-
 function UI:BuildFacingCFrame(position, targetPosition)
     local look = targetPosition - position
     if look.Magnitude <= 0.001 then
@@ -6882,9 +6828,6 @@ function UI:GetSelectedCombatTool()
     end
 
     local backpack = LocalPlayer:FindFirstChildOfClass("Backpack") or LocalPlayer:FindFirstChild("Backpack")
-    if selectedItem == "FLAME" and not backpack then
-        self:DebugFlame("backpack", "Backpack was not found", true, 2)
-    end
     local tool = backpack and backpack:FindFirstChild(selectedItem) or nil
     if tool then
         self.combatEquipPending = true
@@ -6896,7 +6839,7 @@ function UI:GetSelectedCombatTool()
             if self.combatEquipNextSlot > 9 then
                 self.combatEquipNextSlot = 1
             end
-            local equipOk, equipError = pcall(function()
+            pcall(function()
                 local keyCode = 0x30 + selectedSlot
                 if type(setrobloxinput) == "function" then
                     setrobloxinput(true)
@@ -6908,30 +6851,12 @@ function UI:GetSelectedCombatTool()
                     keyrelease(keyCode)
                 end
             end)
-
-            if selectedItem == "FLAME" then
-                if equipOk then
-                    self:DebugFlame(
-                        "equip_slot_" .. tostring(selectedSlot),
-                        "Pressed hotbar slot " .. tostring(selectedSlot)
-                            .. "; next=" .. tostring(self.combatEquipNextSlot),
-                        false,
-                        0.1
-                    )
-                else
-                    self:DebugFlame("equip", "Hotbar equip failed: " .. tostring(equipError), true, 1)
-                end
-            end
         end
 
         return character:FindFirstChild(selectedItem)
     end
 
     self.combatEquipPending = false
-    if selectedItem == "FLAME" then
-        self:DebugFlame("tool", "FLAME was not found in Character or Backpack", true, 2)
-    end
-
     return nil
 end
 
@@ -7021,18 +6946,14 @@ function UI:FireSelectedCombatAttack(itemName)
             return game.ReplicatedStorage.Modules.Net["RE/flamethrowerFire"]
         end)
         if not remoteOk or not remote then
-            self:DebugFlame("remote", "RE/flamethrowerFire was not found: " .. tostring(remote), true, 1)
             return
         end
 
-        local fireOk, fireError = pcall(function()
+        local fireOk = pcall(function()
             remote:FireServer()
         end)
         if fireOk then
             self.flameRemoteActive = true
-            self:DebugFlame("remote", "FireServer succeeded", false, 1)
-        else
-            self:DebugFlame("remote", "FireServer failed: " .. tostring(fireError), true, 1)
         end
     end
 end
@@ -7042,16 +6963,10 @@ function UI:DeactivateFlame(force)
         return
     end
 
-    local deactivateOk, deactivateError = pcall(function()
+    pcall(function()
         game.ReplicatedStorage.Modules.Net["RE/flamethrowerDeactivate"]:FireServer()
     end)
     self.flameRemoteActive = false
-
-    if deactivateOk then
-        self:DebugFlame("remote", "Flamethrower deactivated", false, 1)
-    else
-        self:DebugFlame("remote", "Deactivate failed: " .. tostring(deactivateError), true, 1)
-    end
 end
 
 function UI:HandleCombat(deltaTime)
@@ -7090,9 +7005,6 @@ function UI:HandleCombat(deltaTime)
     local targetPlayer = self:GetSelectedCombatPlayer()
     if not targetPlayer or targetPlayer == LocalPlayer then
         self:DeactivateFlame()
-        if self:GetSelectedKillItem() == "FLAME" then
-            self:DebugFlame("target", "No valid non-local target is selected", true, 1)
-        end
         self:SetCombatLeftMouseHeld(false)
         self:SetCombatInteractHeld(false)
         if not self:IsAutoFarmEnabled() then
@@ -7179,16 +7091,6 @@ function UI:HandleCombat(deltaTime)
     local selectedItem = self:GetSelectedKillItem()
     if not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
         self:DeactivateFlame()
-        if selectedItem == "FLAME" then
-            self:DebugFlame(
-                "target",
-                "Target invalid: root=" .. tostring(targetRoot ~= nil)
-                    .. " humanoid=" .. tostring(targetHumanoid ~= nil)
-                    .. " health=" .. tostring(targetHumanoid and targetHumanoid.Health or "nil"),
-                true,
-                1
-            )
-        end
         self:SetCombatLeftMouseHeld(false)
         self:SetCombatInteractHeld(false)
         if not self:IsAutoFarmEnabled() then
@@ -7251,8 +7153,6 @@ function UI:HandleCombat(deltaTime)
                 toggle.value = false
                 self:MarkTabDirty(3)
                 self:NotifyPlayer("Target stomped", "Windy Combat", 2)
-            else
-                warn("[Baddies Auto Stomp] FireServer failed: " .. tostring(stompError))
             end
         end
         return
@@ -7325,7 +7225,7 @@ function UI:HandleCombat(deltaTime)
             nextPosition = localRoot.Position + (orbitOffset.Unit * orbitStep)
         end
 
-        local orbitOk, orbitError = pcall(function()
+        pcall(function()
             local horizontalTarget = Vector3.new(
                 targetRoot.Position.X,
                 nextPosition.Y,
@@ -7337,17 +7237,6 @@ function UI:HandleCombat(deltaTime)
             end
             localRoot.CFrame = facingCFrame
         end)
-
-        if orbitOk then
-            self:DebugFlame(
-                "orbit",
-                "Orbit CFrame succeeded; target=" .. targetPlayer.Name .. " radius=15",
-                false,
-                1
-            )
-        else
-            self:DebugFlame("orbit", "Orbit CFrame failed: " .. tostring(orbitError), true, 1)
-        end
 
         local reachedOrbit = orbitDistance <= 3 or orbitStep >= orbitDistance
         local relativePosition = localRoot.Position - targetRoot.Position
@@ -7636,9 +7525,6 @@ function UI:RunStompAll()
         end
 
         self.stompAllRunning = false
-        if not runOk then
-            warn("[Baddies Stomp All] " .. tostring(runError))
-        end
     end)
 
     if not started then
@@ -8083,7 +7969,6 @@ end)
 
 UI:AddAction("item_to_kill_with", function()
     UI:DeactivateFlame()
-    warn("[Baddies FLAME][selection] Item To Kill With changed to " .. UI:GetSelectedKillItem())
     UI.combatLastClick = 0
     UI.combatStomping = false
     UI.combatStompStartedAt = 0
@@ -8115,9 +8000,6 @@ UI:AddAction("kill_player_toggle", function(control, enabled)
         if not UI:IsAutoFarmEnabled() then
             UI:SetCharacterNoclip(false)
         end
-    end
-    if UI:GetSelectedKillItem() == "FLAME" then
-        warn("[Baddies FLAME][toggle] Kill Player changed to " .. tostring(enabled))
     end
 end)
 
@@ -8249,12 +8131,9 @@ UI.renderConnection = RunService.RenderStepped:Connect(function(dt)
         UI:HandleAutoPullHair()
     end)
 
-    local combatOk, combatError = pcall(function()
+    pcall(function()
         UI:HandleCombat(dt or (1 / 60))
     end)
-    if not combatOk then
-        warn("[Baddies FLAME][handler] HandleCombat crashed: " .. tostring(combatError))
-    end
 
     pcall(function()
         UI:UpdateRobloxInputCapture()
