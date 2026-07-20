@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ENV = getgenv and getgenv() or shared or _G
 
@@ -238,6 +239,9 @@ local UI = {
     autoDoThread = nil,
     antiCaptureThread = nil,
     saveCapturedThread = nil,
+    slowBeastDownEnabled = false,
+    slowBeastDownGeneration = 0,
+    slowBeastDownThread = nil,
     annoyNpcThread = nil,
     flingBeastConnection = nil,
     flingBeastState = nil,
@@ -247,7 +251,7 @@ local UI = {
     configFolderName = "FtfObsidian",
     configFileName = "config.json",
     title = "mswindy",
-    footerText = "version: sit fix",
+    footerText = "version: hybrid",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -400,6 +404,7 @@ local UI = {
             {id = "anti_capture_toggle", type = "toggle", label = "Anti-Capture", value = false, group = "Automation", side = 1},
             {id = "save_captured_toggle", type = "toggle", label = "Save Captured", value = false, group = "Automation", side = 1},
             {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", group = "Actions", side = 2, disabled = true},
+            {id = "auto_pc_method", type = "dropdown_single", label = "Method", value = "Remote Event", options = {"Remote Event", "Memory"}, group = "Automation", side = 1},
         },
         {
             {id = "no_jump_slowdown", type = "toggle", label = "No Jump Slowdown", value = false, group = "Movement", side = 1},
@@ -413,6 +418,7 @@ local UI = {
             {id = "annoy_beast_front_toggle", type = "toggle", label = "Annoy Beast Front", value = false, group = "Beast", side = 1},
             {id = "annoy_beast_back_toggle", type = "toggle", label = "Annoy Beast Back", value = false, group = "Beast", side = 1},
             {id = "fling_beast_button", type = "button", label = "Fling Beast", group = "Beast", side = 2},
+                        {id = "slow_beast_down_toggle", type = "toggle", label = "Slow Beast Down", value = false, group = "Beast", side = 1},
         },
         {
             {id = "ai_prompt_input", type = "textbox", label = "Message", value = "", placeholder = "Message MatchaMind...", maxLength = 1600, group = "MatchaMind", side = 1},
@@ -3110,6 +3116,102 @@ function UI:GetAntiCapturePosition(beastRoot)
     return beastRoot.Position - (beastRoot.CFrame.LookVector * 30)
 end
 
+function UI:FindSlowBeastTarget()
+    local Workspace = workspace or game.Workspace
+    local models = Workspace:GetChildren()
+
+    for i = 1, #models do
+        local model = models[i]
+        local hammer = model and model:FindFirstChild("Hammer")
+        local handle = hammer and hammer:FindFirstChild("Handle")
+
+        if handle then
+            return model
+        end
+    end
+
+    return nil
+end
+
+function UI:FindPowersEvent(beast)
+    if not beast then
+        return nil
+    end
+
+    local queue = {beast}
+    local index = 1
+
+    while index <= #queue do
+        local parent = queue[index]
+        index = index + 1
+
+        local children = parent:GetChildren()
+
+        for i = 1, #children do
+            local object = children[i]
+
+            if object.Name == "PowersEvent" then
+                return object
+            end
+
+            queue[#queue + 1] = object
+        end
+    end
+
+    return nil
+end
+
+function UI:StartSlowBeastDown()
+    print("[FTF Slow Beast] Start requested")
+    self:StopSlowBeastDown()
+    self.slowBeastDownEnabled = true
+    self.slowBeastDownGeneration = (self.slowBeastDownGeneration or 0) + 1
+    local generation = self.slowBeastDownGeneration
+
+    self.slowBeastDownThread = task.spawn(function()
+        print("[FTF Slow Beast] Worker started", generation)
+        local powersEvent = nil
+
+        while self.isRunning and self.slowBeastDownEnabled and self.slowBeastDownGeneration == generation do
+            if not powersEvent or not powersEvent.Parent then
+                local beast = self:FindSlowBeastTarget()
+                print("[FTF Slow Beast] Beast", beast and beast:GetFullName() or "not found")
+                powersEvent = self:FindPowersEvent(beast)
+                print("[FTF Slow Beast] PowersEvent", powersEvent and powersEvent:GetFullName() or "not found")
+            end
+
+            if powersEvent then
+                local worked, result = pcall(function()
+                    return powersEvent:FireServer("Jumped")
+                end)
+                print("[FTF Slow Beast] FireServer", worked, result)
+
+                if not worked then
+                    powersEvent = nil
+                end
+            end
+
+            wait(1)
+        end
+
+        if self.slowBeastDownGeneration == generation then
+            self.slowBeastDownThread = nil
+        end
+        print("[FTF Slow Beast] Worker stopped", generation, self.isRunning, self.slowBeastDownEnabled, self.slowBeastDownGeneration)
+    end)
+end
+
+function UI:StopSlowBeastDown()
+    print("[FTF Slow Beast] Stop requested", self.slowBeastDownThread ~= nil)
+    self.slowBeastDownEnabled = false
+    self.slowBeastDownGeneration = (self.slowBeastDownGeneration or 0) + 1
+
+    if self.slowBeastDownThread then
+        pcall(task.cancel, self.slowBeastDownThread)
+        self.slowBeastDownThread = nil
+    end
+end
+
 function UI:StartAntiCapture()
     self:StopAntiCapture()
 
@@ -3288,39 +3390,52 @@ function UI:StartAutoDo()
         while self.isRunning do
             local control = self:GetControl(self.exploitsTabIndex or 3, "auto_do_toggle")
             if control and self:GetControlRawValue(control, false) == true then
-                local playerGui = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
-                local screenGui = playerGui and playerGui:FindFirstChild("ScreenGui")
-                local timingCircle = screenGui and screenGui:FindFirstChild("TimingCircle")
-                local timingPin = timingCircle and timingCircle:FindFirstChild("TimingPin")
-                local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
+                local methodControl = self:GetControl(self.settingsTabIndex or 8, "auto_pc_method")
+                local method = methodControl and self:GetControlRawValue(methodControl, "Remote Event") or "Remote Event"
 
-                if timingCircle and timingPin and timingBase then
-                    local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
-                    if ok and circleVisible == 1 then
-                        local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
-                        local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
-                        if pinOk and baseOk then
-                            local diff = math.abs(pinRotation - baseRotation)
-                            if diff > 180 then
-                                diff = 360 - diff
-                            end
-                            if diff <= tolerance and not hasPressed then
-                                local shouldPressInteract = true
-                                if type(isrbxactive) == "function" then
-                                    local focusOk, isActive = pcall(isrbxactive)
-                                    shouldPressInteract = focusOk and isActive == true
+                if method == "Memory" then
+                    local playerGui = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+                    local screenGui = playerGui and playerGui:FindFirstChild("ScreenGui")
+                    local timingCircle = screenGui and screenGui:FindFirstChild("TimingCircle")
+                    local timingPin = timingCircle and timingCircle:FindFirstChild("TimingPin")
+                    local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
+
+                    if timingCircle and timingPin and timingBase then
+                        local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
+                        if ok and circleVisible == 1 then
+                            local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
+                            local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
+                            if pinOk and baseOk then
+                                local diff = math.abs(pinRotation - baseRotation)
+                                if diff > 180 then
+                                    diff = 360 - diff
                                 end
-                                if shouldPressInteract then
-                                    task.wait(0.08)
-                                    keypress(eKey)
-                                    task.wait(0.05)
-                                    keyrelease(eKey)
-                                    hasPressed = true
+                                if diff <= tolerance and not hasPressed then
+                                    local shouldPressInteract = true
+                                    if type(isrbxactive) == "function" then
+                                        local focusOk, isActive = pcall(isrbxactive)
+                                        shouldPressInteract = focusOk and isActive == true
+                                    end
+                                    if shouldPressInteract then
+                                        task.wait(0.08)
+                                        keypress(eKey)
+                                        task.wait(0.05)
+                                        keyrelease(eKey)
+                                        hasPressed = true
+                                    end
                                 end
                             end
+                        else
+                            hasPressed = false
                         end
-                    else
-                        hasPressed = false
+                    end
+                else
+                    hasPressed = false
+                    local remoteEvent = ReplicatedStorage:FindFirstChild("RemoteEvent")
+                    if remoteEvent then
+                        pcall(function()
+                            remoteEvent:FireServer("SetPlayerMinigameResult", true)
+                        end)
                     end
                 end
                 task.wait(0.1)
@@ -3819,6 +3934,7 @@ function UI:SyncFtfStartupToggles()
     self:RefreshEspEnabledState()
 
     local exploitsTab = self.exploitsTabIndex or 3
+    local beastTab = self.beastTabIndex or 4
     local trollTab = self.trollTabIndex or 6
 
     if self:GetControl(exploitsTab, "auto_do_toggle") and self:GetControlRawValue(self:GetControl(exploitsTab, "auto_do_toggle"), false) then
@@ -3830,6 +3946,9 @@ function UI:SyncFtfStartupToggles()
     if self:GetControl(exploitsTab, "save_captured_toggle") and self:GetControlRawValue(self:GetControl(exploitsTab, "save_captured_toggle"), false) then
         self:StartSaveCaptured()
     end
+    if self:GetControl(beastTab, "slow_beast_down_toggle") and self:GetControlRawValue(self:GetControl(beastTab, "slow_beast_down_toggle"), false) then
+        self:StartSlowBeastDown()
+    end
     if (self:GetControl(trollTab, "annoy_beast_front_toggle") and self:GetControlRawValue(self:GetControl(trollTab, "annoy_beast_front_toggle"), false))
         or (self:GetControl(trollTab, "annoy_beast_back_toggle") and self:GetControlRawValue(self:GetControl(trollTab, "annoy_beast_back_toggle"), false)) then
         self:StartAnnoyBeast()
@@ -3840,6 +3959,7 @@ function UI:CleanupFtfResources()
     self:StopAutoDo()
     self:StopAntiCapture()
     self:StopSaveCaptured()
+    self:StopSlowBeastDown()
     self:StopAnnoyBeast()
     self:StopFlingBeast()
     self:HideAllEsp()
@@ -5410,6 +5530,16 @@ end)
 UI:AddAction("no_cooldown_runner", function(control, value)
     UI.status = value and "No Cooldown Runner" or "Ready"
     UI:NotifyPlayer(value and "Hold Q to use runner speed" or "Runner speed disabled", "FTF Obsidian", 3)
+end)
+
+UI:AddAction("slow_beast_down_toggle", function(control, value)
+    print("[FTF Slow Beast] Toggle action", value, UI:GetControlRawValue(control, false))
+    UI.status = value and "Slow Beast Down" or "Ready"
+    if value then
+        UI:StartSlowBeastDown()
+    else
+        UI:StopSlowBeastDown()
+    end
 end)
 
 UI:AddAction("end_round_button", function()
