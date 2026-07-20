@@ -242,6 +242,7 @@ local UI = {
     slowBeastDownEnabled = false,
     slowBeastDownGeneration = 0,
     slowBeastDownThread = nil,
+    hitAuraThread = nil,
     annoyNpcThread = nil,
     flingBeastConnection = nil,
     flingBeastState = nil,
@@ -251,7 +252,7 @@ local UI = {
     configFolderName = "FtfObsidian",
     configFileName = "config.json",
     title = "mswindy",
-    footerText = "version: hybrid 1.01",
+    footerText = "version: hybrid 1.02",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -401,7 +402,7 @@ local UI = {
         },
         {
             {id = "auto_do_toggle", type = "toggle", label = "Auto PC Puzzle", value = false, group = "Automation", side = 1},
-            {id = "anti_capture_toggle", type = "toggle", label = "Anti-Capture", value = false, group = "Automation", side = 1},
+            {id = "anti_capture_toggle", type = "toggle", label = "Anti-Capture Everyone", value = false, group = "Automation", side = 1},
             {id = "save_captured_toggle", type = "toggle", label = "Save Captured", value = false, group = "Automation", side = 1},
             {id = "force_unfreeze_button", type = "button", label = "Force Unfreeze", group = "Actions", side = 2, disabled = true},
             {id = "auto_pc_method", type = "dropdown_single", label = "Method", value = "Remote Event", options = {"Remote Event", "Memory"}, group = "Automation", side = 1},
@@ -409,6 +410,9 @@ local UI = {
         {
             {id = "no_jump_slowdown", type = "toggle", label = "No Jump Slowdown", value = false, group = "Movement", side = 1},
             {id = "no_cooldown_runner", type = "toggle", label = "No Cooldown Runner Only", value = false, group = "Movement", side = 1},
+            {id = "hit_aura_range", type = "slider", label = "Hit Aura Range", value = 10, min = 5, max = 15, step = 1, group = "Hit Aura", side = 1},
+            {id = "hit_aura_whitelist", type = "dropdown_multi", label = "Whitelist", options = {}, selected = {}, value = {}, searchable = true, group = "Hit Aura", side = 1},
+            {id = "hit_aura_toggle", type = "toggle", label = "Hit Aura", value = false, group = "Hit Aura", side = 1},
             {id = "end_round_button", type = "button", label = "End Round", group = "Round", side = 2, disabled = true},
         },
         {
@@ -3108,14 +3112,6 @@ function UI:GetAnnoyBeastBackPosition(beastRoot)
     return beastRoot.Position - (beastRoot.CFrame.LookVector * 10)
 end
 
-function UI:GetAntiCapturePosition(beastRoot)
-    if not beastRoot then
-        return nil
-    end
-
-    return beastRoot.Position - (beastRoot.CFrame.LookVector * 30)
-end
-
 function UI:FindSlowBeastTarget()
     local Workspace = workspace or game.Workspace
     local models = Workspace:GetChildren()
@@ -3154,6 +3150,30 @@ function UI:FindPowersEvent(beast)
                 return object
             end
 
+            queue[#queue + 1] = object
+        end
+    end
+
+    return nil
+end
+
+function UI:FindHammerEvent(model)
+    if not model then
+        return nil
+    end
+
+    local queue = {model}
+    local index = 1
+    while index <= #queue do
+        local parent = queue[index]
+        index = index + 1
+
+        local children = parent:GetChildren()
+        for i = 1, #children do
+            local object = children[i]
+            if object.Name == "HammerEvent" then
+                return object
+            end
             queue[#queue + 1] = object
         end
     end
@@ -3205,31 +3225,140 @@ function UI:StopSlowBeastDown()
     end
 end
 
-function UI:StartAntiCapture()
-    self:StopAntiCapture()
+function UI:RefreshHitAuraWhitelist(force)
+    local beastTab = self.beastTabIndex or 4
+    local control = self:GetControl(beastTab, "hit_aura_whitelist")
+    if not control then
+        return
+    end
 
-    self.antiCaptureThread = task.spawn(function()
+    local now = tick()
+    if not force and now - (self.lastHitAuraWhitelistRefresh or 0) < 1 then
+        return
+    end
+    self.lastHitAuraWhitelistRefresh = now
+
+    local playerNames = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerNames, player.Name)
+        end
+    end
+    table.sort(playerNames, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+
+    local signature = table.concat(playerNames, "\0")
+    if force or signature ~= self.hitAuraWhitelistSignature then
+        self.hitAuraWhitelistSignature = signature
+        control.options = playerNames
+        self:MarkTabDirty(beastTab)
+    end
+end
+
+function UI:StartHitAura()
+    self:StopHitAura()
+    self:RefreshHitAuraWhitelist(true)
+
+    self.hitAuraThread = task.spawn(function()
         while self.isRunning do
-            local control = self:GetControl(self.exploitsTabIndex or 3, "anti_capture_toggle")
-            if not (control and self:GetControlRawValue(control, false) == true) then
+            local beastTab = self.beastTabIndex or 4
+            local toggle = self:GetControl(beastTab, "hit_aura_toggle")
+            if not (toggle and self:GetControlRawValue(toggle, false) == true) then
                 task.wait(0.15)
             else
-                local localCharacter = LocalPlayer and LocalPlayer.Character
-                local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+                self:RefreshHitAuraWhitelist(false)
 
-                if localRoot and self:IsLocalPlayerRagdolled() and not self:IsLocalPlayerCaptured() and not self:IsLocalPlayerBeastNow() then
-                    local _, beastRoot = self:GetBeastTargetRoot()
-                    if beastRoot then
-                        local targetPosition = self:GetAntiCapturePosition(beastRoot)
-                        if targetPosition then
-                            localRoot.Position = targetPosition
+                local beastModel = self:FindSlowBeastTarget()
+                local beastPlayer = nil
+                if beastModel then
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player.Character == beastModel or player.Name == beastModel.Name then
+                            beastPlayer = player
+                            break
                         end
                     end
                 end
 
-                task.wait(0.06)
+                local whitelistControl = self:GetControl(beastTab, "hit_aura_whitelist")
+                local whitelist = whitelistControl and (whitelistControl.selected or whitelistControl.Selected or whitelistControl.value) or {}
+                local localPlayerIsBeast = beastPlayer == LocalPlayer or self:IsLocalPlayerBeastNow()
+                local whitelistedPlayerIsBeast = beastPlayer and whitelist[beastPlayer.Name] == true
+
+                if beastModel and (localPlayerIsBeast or whitelistedPlayerIsBeast) then
+                    local beastRoot = beastModel:FindFirstChild("HumanoidRootPart")
+                    local hammerEvent = self:FindHammerEvent(beastModel)
+                    local rangeControl = self:GetControl(beastTab, "hit_aura_range")
+                    local hitRange = tonumber(rangeControl and self:GetControlRawValue(rangeControl, 10)) or 10
+
+                    if beastRoot and hammerEvent then
+                        for _, player in ipairs(Players:GetPlayers()) do
+                            if player ~= beastPlayer and player.Name ~= beastModel.Name then
+                                local stats = player:FindFirstChild("TempPlayerStatsModule")
+                                local ragdoll = stats and stats:FindFirstChild("Ragdoll")
+                                local captured = stats and stats:FindFirstChild("Captured")
+                                local isRagdolled = ragdoll and (ragdoll.Value == true or ragdoll.Value == 1)
+                                local isCaptured = captured and (captured.Value == true or captured.Value == 1)
+                                local character = player.Character
+                                local root = character and character:FindFirstChild("HumanoidRootPart")
+                                local distance = root and (root.Position - beastRoot.Position).Magnitude or nil
+
+                                if ragdoll and captured and not isRagdolled and not isCaptured and root and distance <= hitRange then
+                                    pcall(function()
+                                        hammerEvent:FireServer("HammerHit", root)
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                task.wait(0.15)
             end
         end
+
+        self.hitAuraThread = nil
+    end)
+end
+
+function UI:StopHitAura()
+    if self.hitAuraThread then
+        pcall(task.cancel, self.hitAuraThread)
+        self.hitAuraThread = nil
+    end
+end
+
+function UI:StartAntiCapture()
+    self:StopAntiCapture()
+
+    self.antiCaptureThread = task.spawn(function()
+        local hammerEvent = nil
+
+        while self.isRunning do
+            local control = self:GetControl(self.exploitsTabIndex or 3, "anti_capture_toggle")
+            if not (control and self:GetControlRawValue(control, false) == true) or self:IsLocalPlayerBeastNow() then
+                hammerEvent = nil
+                task.wait(0.5)
+            else
+                if not hammerEvent or not hammerEvent.Parent then
+                    local beast = self:FindSlowBeastTarget()
+                    hammerEvent = self:FindHammerEvent(beast)
+                end
+
+                if hammerEvent then
+                    local worked = pcall(function()
+                        hammerEvent:FireServer("HammerClick", true)
+                    end)
+                    if not worked then
+                        hammerEvent = nil
+                    end
+                end
+
+                task.wait(0.5)
+            end
+        end
+
+        self.antiCaptureThread = nil
     end)
 end
 
@@ -3942,6 +4071,9 @@ function UI:SyncFtfStartupToggles()
     if self:GetControl(beastTab, "slow_beast_down_toggle") and self:GetControlRawValue(self:GetControl(beastTab, "slow_beast_down_toggle"), false) then
         self:StartSlowBeastDown()
     end
+    if self:GetControl(beastTab, "hit_aura_toggle") and self:GetControlRawValue(self:GetControl(beastTab, "hit_aura_toggle"), false) then
+        self:StartHitAura()
+    end
     if (self:GetControl(trollTab, "annoy_beast_front_toggle") and self:GetControlRawValue(self:GetControl(trollTab, "annoy_beast_front_toggle"), false))
         or (self:GetControl(trollTab, "annoy_beast_back_toggle") and self:GetControlRawValue(self:GetControl(trollTab, "annoy_beast_back_toggle"), false)) then
         self:StartAnnoyBeast()
@@ -3953,6 +4085,7 @@ function UI:CleanupFtfResources()
     self:StopAntiCapture()
     self:StopSaveCaptured()
     self:StopSlowBeastDown()
+    self:StopHitAura()
     self:StopAnnoyBeast()
     self:StopFlingBeast()
     self:HideAllEsp()
@@ -5531,6 +5664,15 @@ UI:AddAction("slow_beast_down_toggle", function(control, value)
         UI:StartSlowBeastDown()
     else
         UI:StopSlowBeastDown()
+    end
+end)
+
+UI:AddAction("hit_aura_toggle", function(control, value)
+    UI.status = value and "Hit Aura" or "Ready"
+    if value then
+        UI:StartHitAura()
+    else
+        UI:StopHitAura()
     end
 end)
 
@@ -8082,6 +8224,7 @@ end)
 
 UI:RefreshHomeStats(true)
 UI:RefreshStatsTab(true)
+UI:RefreshHitAuraWhitelist(true)
 UI:SyncFtfStartupToggles()
 UI:Render()
 UI:DebugPerfReport(true)
@@ -8227,6 +8370,12 @@ UI.renderConnection = RunService.RenderStepped:Connect(function(dt)
         if UI.selectedTab == (UI.statsTabIndex or 5) then
             pcall(function()
                 UI:RefreshStatsTab(false)
+            end)
+        end
+
+        if UI.selectedTab == (UI.beastTabIndex or 4) then
+            pcall(function()
+                UI:RefreshHitAuraWhitelist(false)
             end)
         end
 
