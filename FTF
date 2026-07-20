@@ -251,7 +251,7 @@ local UI = {
     configFolderName = "FtfObsidian",
     configFileName = "config.json",
     title = "mswindy",
-    footerText = "version: hybrid",
+    footerText = "version: hybrid 1.01",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -3162,29 +3162,24 @@ function UI:FindPowersEvent(beast)
 end
 
 function UI:StartSlowBeastDown()
-    print("[FTF Slow Beast] Start requested")
     self:StopSlowBeastDown()
     self.slowBeastDownEnabled = true
     self.slowBeastDownGeneration = (self.slowBeastDownGeneration or 0) + 1
     local generation = self.slowBeastDownGeneration
 
     self.slowBeastDownThread = task.spawn(function()
-        print("[FTF Slow Beast] Worker started", generation)
         local powersEvent = nil
 
         while self.isRunning and self.slowBeastDownEnabled and self.slowBeastDownGeneration == generation do
             if not powersEvent or not powersEvent.Parent then
                 local beast = self:FindSlowBeastTarget()
-                print("[FTF Slow Beast] Beast", beast and beast:GetFullName() or "not found")
                 powersEvent = self:FindPowersEvent(beast)
-                print("[FTF Slow Beast] PowersEvent", powersEvent and powersEvent:GetFullName() or "not found")
             end
 
             if powersEvent then
                 local worked, result = pcall(function()
                     return powersEvent:FireServer("Jumped")
                 end)
-                print("[FTF Slow Beast] FireServer", worked, result)
 
                 if not worked then
                     powersEvent = nil
@@ -3197,12 +3192,10 @@ function UI:StartSlowBeastDown()
         if self.slowBeastDownGeneration == generation then
             self.slowBeastDownThread = nil
         end
-        print("[FTF Slow Beast] Worker stopped", generation, self.isRunning, self.slowBeastDownEnabled, self.slowBeastDownGeneration)
     end)
 end
 
 function UI:StopSlowBeastDown()
-    print("[FTF Slow Beast] Stop requested", self.slowBeastDownThread ~= nil)
     self.slowBeastDownEnabled = false
     self.slowBeastDownGeneration = (self.slowBeastDownGeneration or 0) + 1
 
@@ -5533,7 +5526,6 @@ UI:AddAction("no_cooldown_runner", function(control, value)
 end)
 
 UI:AddAction("slow_beast_down_toggle", function(control, value)
-    print("[FTF Slow Beast] Toggle action", value, UI:GetControlRawValue(control, false))
     UI.status = value and "Slow Beast Down" or "Ready"
     if value then
         UI:StartSlowBeastDown()
