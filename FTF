@@ -226,6 +226,7 @@ local UI = {
     exitDoorColorCache = {},
     currentMapRoot = nil,
     lastComputerMapCheck = 0,
+    lastPcEspDebugTick = 0,
     computerCacheMap = nil,
     freezePodCacheMap = nil,
     exitDoorCacheMap = nil,
@@ -252,7 +253,7 @@ local UI = {
     configFolderName = "FtfObsidian",
     configFileName = "config.json",
     title = "mswindy",
-    footerText = "version: hybrid 1.02",
+    footerText = "version: hybrid 1.03",
     globalSearch = true,
     searchBackspaceStartedAt = nil,
     searchBackspaceNextAt = nil,
@@ -395,8 +396,8 @@ local UI = {
             {id = "npc_player_esp", type = "toggle", label = "Player ESP", value = false, group = "Characters", side = 1},
             {id = "npc_beast_esp", type = "toggle", label = "Beast ESP", value = false, group = "Characters", side = 1},
             {id = "pc_esp", type = "toggle", label = "PC ESP", value = false, group = "Computers", side = 2},
-            {id = "hide_hacked_pcs", type = "toggle", label = "Hide Hacked PCs", value = false, group = "Computers", side = 2},
-            {id = "hide_error_pcs", type = "toggle", label = "Hide Error PCs", value = false, group = "Computers", side = 2},
+            {id = "hide_hacked_pcs", type = "toggle", label = "Hide Hacked PCs", value = false, group = "Computers", side = 2, disabled = true},
+            {id = "hide_error_pcs", type = "toggle", label = "Hide Error PCs", value = false, group = "Computers", side = 2, disabled = true},
             {id = "freeze_pod_esp", type = "toggle", label = "Freeze Pod ESP", value = false, group = "Map", side = 2},
             {id = "exit_door_esp", type = "toggle", label = "Exit Door ESP", value = false, group = "Map", side = 2},
         },
@@ -2731,6 +2732,22 @@ function UI:GetComputerTargets()
     return self:RefreshComputerCache(false)
 end
 
+function UI:GetDebugInstancePath(obj)
+    if not obj then
+        return "nil"
+    end
+
+    local ok, fullName = pcall(function()
+        return obj:GetFullName()
+    end)
+
+    if ok and fullName then
+        return tostring(fullName)
+    end
+
+    return tostring(obj.Name or obj)
+end
+
 function UI:RefreshFreezePodCache(force)
     local mapRoot = self:GetCurrentFtfMapRoot(false)
 
@@ -3523,10 +3540,10 @@ function UI:StartAutoDo()
                     local timingBase = timingCircle and timingCircle:FindFirstChild("TimingBase")
 
                     if timingCircle and timingPin and timingBase then
-                        local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5b5)
+                            local ok, circleVisible = pcall(memory_read, "byte", timingCircle.Address + 0x5ad)
                         if ok and circleVisible == 1 then
-                            local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x188)
-                            local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x188)
+                            local pinOk, pinRotation = pcall(memory_read, "float", timingPin.Address + 0x178)
+                            local baseOk, baseRotation = pcall(memory_read, "float", timingBase.Address + 0x178)
                             if pinOk and baseOk then
                                 local diff = math.abs(pinRotation - baseRotation)
                                 if diff > 180 then
@@ -3691,9 +3708,17 @@ function UI:UpdateComputerEsp()
     local uiTop = self.window.y
     local uiRight = self.window.x + self.window.width
     local uiBottom = self.window.y + self.window.height
+    local targets = self:GetComputerTargets()
+    local validTargets = 0
+    local drawn = 0
+    local offscreen = 0
+    local overlappedUi = 0
+    local hiddenByFilter = 0
+    local invalidTargets = 0
 
-    for index, trigger in ipairs(self:GetComputerTargets()) do
+    for index, trigger in ipairs(targets) do
         if trigger and trigger.Parent and trigger:IsDescendantOf(workspace) then
+            validTargets = validTargets + 1
             local key = "pc:" .. tostring(index) .. ":" .. tostring(trigger)
             local entry = self:GetEspEntry(key)
             local screenPoint, visible = self:GetWorldToScreen(trigger.Position + Vector3.new(0, 1.5, 0))
@@ -3710,6 +3735,7 @@ function UI:UpdateComputerEsp()
                 local overlapsUI = self.uiVisible and boxRight >= uiLeft and boxX <= uiRight and boxBottom >= uiTop and boxY <= uiBottom
 
                 if overlapsUI then
+                    overlappedUi = overlappedUi + 1
                     self:HideEspEntry(entry)
                 else
                     entry.box.Position = Vector2.new(boxX, boxY)
@@ -3732,8 +3758,8 @@ function UI:UpdateComputerEsp()
                     local labelText = "Hacked"
                     local shouldHide = false
 
-                    if r == 13 and g == 105 and b == 172 then
-                        labelText = "PC Hackable"
+                    if r == 192 and g == 176 and b == 157 then
+                        labelText = "PC"
                     elseif r == 196 and g == 40 and b == 28 then
                         if hideErrored then
                             labelText = "PC Hackable"
@@ -3748,6 +3774,7 @@ function UI:UpdateComputerEsp()
                     local espColor = Color3.fromRGB(r, g, b)
 
                     if shouldHide then
+                        hiddenByFilter = hiddenByFilter + 1
                         self:HideEspEntry(entry)
                     else
                         entry.box.Color = espColor
@@ -3756,13 +3783,33 @@ function UI:UpdateComputerEsp()
                         entry.label.Position = Vector2.new(math.floor(screenPoint.X), math.floor(boxY - 15))
                         entry.label.Color = espColor
                         entry.label.Visible = true
+                        drawn = drawn + 1
                     end
                 end
             else
+                offscreen = offscreen + 1
                 self:HideEspEntry(entry)
             end
+        else
+            invalidTargets = invalidTargets + 1
         end
     end
+
+    local mapRoot = self.currentMapRoot
+    self:DebugPcEsp(
+        "enabled=false"
+        .. " map=" .. self:GetDebugInstancePath(mapRoot)
+        .. " cache=" .. tostring(#(self.computerCache or {}))
+        .. " targets=" .. tostring(#targets)
+        .. " valid=" .. tostring(validTargets)
+        .. " drawn=" .. tostring(drawn)
+        .. " offscreen=" .. tostring(offscreen)
+        .. " uiOverlap=" .. tostring(overlappedUi)
+        .. " hiddenFilter=" .. tostring(hiddenByFilter)
+        .. " invalid=" .. tostring(invalidTargets)
+        .. " hideHacked=" .. tostring(hideHacked)
+        .. " hideErrored=" .. tostring(hideErrored)
+    )
 
     self:CleanupTrackedEspKeys("pc", seen)
 end
